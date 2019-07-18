@@ -5,7 +5,8 @@
  add Wire interface to BME/P180/280 class device. 
  DHT bit works
  BMP 280 works + BME280 library 
- BMP280 is desireable since it also supports humidity for direct dewpoint measurement nd has greater precision for temperature.
+ BMP280 is desirable since it also supports humidity for direct dewpoint measurement and has greater precision for temperature.
+ QMC5883L 
  
  Layout:
  Pin 13 to DHT data 
@@ -29,6 +30,9 @@ Todo - add HMC5883L library
 #include <ESP8266WebServer.h>
 #include <ArduinoJson.h>
 
+//QMC5883 device library 
+#include <QMC5883L.h>
+
 //BMP 280 device uses sensor library 
 #include "i2c.h"
 #include "i2c_BMP280.h"
@@ -37,7 +41,7 @@ Todo - add HMC5883L library
 #include <time.h>
 #include <sys/time.h>
 #include <coredecls.h>
-#define TZ              1       // (utc+) TZ in hours
+#define TZ              0       // (utc+) TZ in hours
 #define DST_MN          60      // use 60mn for summer time in some countries
 #define TZ_MN           ((TZ)*60)
 #define TZ_SEC          ((TZ)*3600)
@@ -65,7 +69,7 @@ long lastMsg = 0;
 char msg[50];
 
 //Web server data formatter
-DynamicJsonBuffer jsonBuffer(256);
+//DynamicJsonBuffer jsonBuffer(256);
 
 // Create an instance of the server
 // specify the port to listen on as an argument
@@ -73,16 +77,33 @@ ESP8266WebServer server(80);
 
 //Hardware device system functions - reset/restart etc
 EspClass device;
+ETSTimer timer;
+volatile bool newDataFlag = false;
+
+void onTimer(void);
+String& getTimeAsString(String& );
 
 //Handler function definitions
 void handleRoot();
 
-float humidity = 0.0F;
-float temperature = 0.0F;
-float pressure = 0.0F;
-float dewpoint = 0.0F;
 DHTesp dht;
 BMP280 bmp280;
+QMC5883L compass;
+int error = 0;
+Vector raw; 
+
+bool compassPresent = false;
+bool dht11Present = false;
+bool bmp280Present = false;
+
+//Last data points
+float bearing = 0.0f;
+float humidity = 0.0F;
+float pressure = 0.0F;
+float dewpoint = 0.0F;
+float aTemperature = 0.0f;
+float bTemperature = 0.0f;
+float cTemperature = 0.0f;
 
 void setup_wifi()
 {
@@ -102,6 +123,8 @@ void setup_wifi()
       Serial.print(".");
   }
   Serial.println("WiFi connected");
+  Serial.print("Hostname: ");
+  Serial.println( myHostname );
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 }
@@ -112,6 +135,9 @@ void setup()
   Serial.println();
   Serial.println(F("ESP starting."));
 
+  //Setup timestruct
+  now = time(nullptr);
+  
   // Connect to wifi 
   setup_wifi();                   
   
@@ -122,7 +148,6 @@ void setup()
   //Create a timer-based callback that causes this device to read the local i2C bus devices for data to publish.
   client.setCallback(callback);
   
-   //Configure i2c connection to BMP280 pressure monitor
   //Pins mode and direction setup for i2c on ESP8266-01
   pinMode(0, OUTPUT);
   pinMode(2, OUTPUT);
@@ -142,19 +167,24 @@ void setup()
   dht.setup(3, DHTesp::DHT11); // Connect DHT sensor to GPIO 3
 
   Serial.print("Probe BMP280: ");
-  if (bmp280.initialize()) Serial.println("Sensor found");
+  bmp280Present = bmp280.initialize();
+  if ( !bmp280Present ) 
+  {
+    Serial.println("BMP280 Sensor missing");
+  }
   else
   {
-      Serial.println("Sensor missing");
-      while (1) {}
+    Serial.println("BMP280 Sensor found");
+    // onetime-measure:
+    bmp280.setEnabled(0);
+    bmp280.triggerMeasurement();
   }
+ 
+  Serial.println("Setup compass");
+  compassPresent = compass.begin();
+  if( !compassPresent ) // If there is an error, print it out.
+     Serial.println( "Compass not found");
 
-  // onetime-measure:
-  bmp280.setEnabled(0);
-  bmp280.triggerMeasurement();
-
-  //Setup json library
-  
   //Setup webserver handler functions
   server.on("/", handleRoot);
   server.onNotFound(handleNotFound);
@@ -163,55 +193,97 @@ void setup()
   //server.onUpload();    
   server.begin();
   
-  Serial.println();
-  Serial.println("Status\tHumidity (%)\tTemperature (C)");
+  //Setup timers
+  //setup interrupt-based 'soft' alarm handler for periodic acquisition of new bearing
+  ets_timer_setfn( &timer, onTimer, NULL ); 
+  
+  //Setup sleep parameters
+  wifi_set_sleep_type(LIGHT_SLEEP_T);
+
+  //fire timer every 250 msec
+  //Set the timer function first
+  ets_timer_arm_new( &timer, 250, 1/*repeat*/, 1);
 }
 
+//Timer handler for 'soft' 
+void onTimer( void * pArg )
+{
+  newDataFlag = true;
+}
+
+//Main processing loop
 void loop()
 {
-  delay(dht.getMinimumSamplingPeriod());
-  humidity  = dht.getHumidity();
-  temperature = dht.getTemperature();
-
-  //Get the pressure and turn into dew point info
-  pressure = 103265.0;
-    
-  //Print debug output to serial
-  Serial.print(dht.getStatusString());
-  Serial.print("\t");
-  Serial.print(humidity, 1);
-  Serial.print("\t\t");
-  Serial.print(temperature, 1);
-  Serial.println("\t\t");
-
-  bmp280.awaitMeasurement();
-
-  float bTemperature;
-  bmp280.getTemperature(bTemperature);
-  bmp280.getPressure( pressure );
+  String timestamp;
+  String output;
   
-  bmp280.triggerMeasurement();
+  DynamicJsonBuffer jsonBuffer(256);
 
-  Serial.print(" Pressure: ");
-  Serial.print( pressure );
-  Serial.print(" Pa; T: ");
-  Serial.print( bTemperature);
-  Serial.println(" C");
+  if( newDataFlag) 
+  {
+    getTimeAsString( timestamp );
     
-  /*
-   * if (!client.connected()) 
+    //delay(dht.getMinimumSamplingPeriod());
+    if( dht11Present )
+    {
+      humidity  = dht.getHumidity();
+      aTemperature = dht.getTemperature();
+    }
+    
+    //Get the pressure and turn into dew point info
+    if( bmp280Present )
+    {
+      bmp280.awaitMeasurement();
+      bmp280.getTemperature( bTemperature );
+      bmp280.getPressure( pressure );   
+      bmp280.triggerMeasurement();
+    }
+    else
+    {
+      pressure = 103265.0;    
+    }
+    
+    // Retrieve the raw values from the compass (not scaled).
+    raw = compass.readRaw();  
+
+    //generate output records
+    JsonObject& root = jsonBuffer.createObject();
+    root["time"] = "\"" + timestamp + "\"";
+    if( compassPresent) 
+    {
+      root["Bx"] = raw.XAxis;
+      root["By"] = raw.YAxis;
+      root["Bz"] = raw.ZAxis;
+      bearing = 180.0/M_PI * atan2( raw.YAxis, raw.XAxis);
+      bearing = ( bearing < 0.0F ) ? bearing+360.0F: bearing;
+      root["Bearing"] = bearing;
+      cTemperature = compass.getTemperature();
+      root["Temperature"] = cTemperature;
+    }
+    
+    if ( dht11Present )
+      dewpoint = dht.computeDewPoint( aTemperature, humidity, false );
+    
+    JsonArray& temps = root.createNestedArray("temperatures");
+    temps.add( aTemperature );
+    temps.add( bTemperature );
+    temps.add( cTemperature ) ;
+    root.printTo( output );
+
+    newDataFlag = false;
+  }  
+  
+  if (!client.connected()) 
   {
     reconnect();
   }
   
   client.loop();
-  */
 }
 
 String& getTimeAsString(String& output)
 {
     //get time, maintained by NTP
-    now = time(nullptr);
     struct tm* gnow = gmtime( &now );
     output += String(gnow->tm_year + 1900) + ":" + \
                    String(gnow->tm_mon) + ":" + \
@@ -225,7 +297,9 @@ String& getTimeAsString(String& output)
   void handleNotFound()
   {
   String message = "URL not understood\n";
-  message += "Simple read: http://<this device>\n";
+  message.concat( "Simple read: http://");
+  message.concat( myHostname );
+  message.concat ( "\n");
   server.send(404, "text/plain", message);
   }
 
@@ -234,13 +308,23 @@ String& getTimeAsString(String& output)
     int args;
     String timeString = "", message = "";
     int argsFoundMask = 0;
-
+    DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
 
     root["time"] = getTimeAsString( timeString );
-    root["temperature"] = temperature;
-    root["pressure"] = pressure;
-    root["humidity"] = humidity;
+    if( dht11Present )
+      root["temperature"] = aTemperature;
+    if( dht11Present )  
+      root["humidity"] = humidity;
+    if( bmp280Present )  
+      root["pressure"] = pressure;
+    if( compassPresent)
+    {
+      JsonArray& components = root.createNestedArray("Magnetic Fields");
+      components.add( raw.XAxis );
+      components.add( raw.YAxis );
+      components.add( raw.ZAxis );
+    }
     root.printTo(message);
 
     server.send(200, "application/json", message);
@@ -259,31 +343,51 @@ void callback(char* topic, byte* payload, unsigned int length)
   getTimeAsString( timestamp );
 
   //publish to our device topic(s)
+  DynamicJsonBuffer jsonBuffer(256);
   JsonObject& root = jsonBuffer.createObject();
 
-  root["time"] = timestamp;
-  root["temperature"] = temperature;
-  root.printTo( output );
-  outTopic = outSenseTopic;
-  outTopic.concat("temperature/");
-  outTopic.concat(myHostname);
-  client.publish( outTopic.c_str(), output.c_str() );
+  if( dht11Present)
+  {
+    root["time"] = timestamp;
+    root["temperature"] = aTemperature;
+    root.printTo( output );
+    outTopic = outSenseTopic;
+    outTopic.concat("temperature/");
+    outTopic.concat(myHostname);
+    client.publish( outTopic.c_str(), output.c_str() );
+
+    root.remove( "temperature");
+    root["humidity"] = humidity;
+    root.printTo( output );
+    outTopic = outSenseTopic;
+    outTopic.concat("humidity/");
+    outTopic.concat(myHostname);
+    client.publish( outTopic.c_str() , output.c_str() );
+  }
   
-  root.remove( "temperature");
-  root["humidity"] = humidity;
-  root.printTo( output );
-  outTopic = outSenseTopic;
-  outTopic.concat("humidity/");
-  outTopic.concat(myHostname);
-  client.publish( outTopic.c_str() , output.c_str() );
-  
-  root.remove( "humidity/");
-  root["pressure"] = pressure;
-  root.printTo( output );
-  outTopic = outSenseTopic;
-  outTopic.concat("pressure/");
-  outTopic.concat(myHostname);
-  client.publish( outTopic.c_str(), output.c_str() );        
+  if( bmp280Present)
+  {
+    root.remove( "humidity/");
+    root["pressure"] = pressure;
+    root.printTo( output );
+    outTopic = outSenseTopic;
+    outTopic.concat("pressure/");
+    outTopic.concat(myHostname);
+    client.publish( outTopic.c_str(), output.c_str() );        
+  }
+
+  if( compassPresent )
+  {
+    root.remove( "humidity/");
+    root["Bx"] = raw.XAxis;
+    root["By"] = raw.YAxis;    
+    root["Bz"] = raw.ZAxis;    
+    root.printTo( output );
+    outTopic = outSenseTopic;
+    outTopic.concat("magneticField/");
+    outTopic.concat(myHostname);
+    client.publish( outTopic.c_str(), output.c_str() );           
+  }
 }
 
 void reconnect() 
