@@ -23,12 +23,13 @@ Todo - add HMC5883L library
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h> //https://pubsubclient.knolleary.net/api.html
 #include <EEPROM.h>
-#include "DHTesp.h"
-#include <Wire.h> //https://playground.arduino.cc/Main/WireLibraryDetailedReference
-#include <Time.h> //Look at https://github.com/PaulStoffregen/Time for a more useful internal timebase library
+#include <Wire.h>         //https://playground.arduino.cc/Main/WireLibraryDetailedReference
+#include <Time.h>         //Look at https://github.com/PaulStoffregen/Time for a more useful internal timebase library
 #include <WiFiUdp.h>
 #include <ESP8266WebServer.h>
 #include <ArduinoJson.h>
+
+#include "DHTesp.h"
 
 //QMC5883 device library 
 #include <QMC5883L.h>
@@ -52,24 +53,24 @@ IPAddress timeServer(193,238,191,249); // pool.ntp.org NTP server
 unsigned long NTPseconds; //since 1970
 
 //Strings
-const char* myHostname = "espTHP01";
-const char* ssid = "";
-const char* password = "";
-const char* pubsubUserID = "";
-const char* pubsubUserPwd = "";
-const char* mqtt_server = "obbo";
-const char* thisID = "espTHP01";
-const char* outHealthTopic = "skybadger/devices/";
-const char* outSenseTopic = "skybadger/sensors/";
-const char* inTopic = "skybadger/devices/heartbeat";
+const char* myHostname =      "espTHP01";
+const char* ssid =            "BadgerHome";
+const char* password =        "This is Badger Home";
+//const char* ssid =            "Skybadger_Away";
+//const char* password =        "This is Skybadger Away";
+
+const char* pubsubUserID =    "Skybadger";
+const char* pubsubUserPwd =   "alltooeasy1";
+const char* mqtt_server =     "Y-BADGER.i-badger.co.uk";
+const char* thisID =          "espTHP01";
+const char* outHealthTopic =  "/skybadger/devices/";
+const char* outSenseTopic =   "/skybadger/sensors/";
+const char* inTopic =         "/skybadger/devices/heartbeat";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 long lastMsg = 0;
 char msg[50];
-
-//Web server data formatter
-//DynamicJsonBuffer jsonBuffer(256);
 
 // Create an instance of the server
 // specify the port to listen on as an argument
@@ -107,14 +108,15 @@ float cTemperature = 0.0f;
 
 void setup_wifi()
 {
-  //Start NTP client
-  configTime(TZ_SEC, DST_SEC, "pool.ntp.org");
+  IPAddress googleDNS(8,8,8,8);
+  IPAddress badgerDNS(192,168,0,48);
+  IPAddress gatewayDNS(192,168,0,1);
 
   WiFi.hostname( myHostname );
   WiFi.mode(WIFI_STA);
   Serial.print("Connecting to ");
   Serial.println(ssid);
-
+  
   WiFi.begin(ssid, password);
   Serial.print("Searching for WiFi..");
   while (WiFi.status() != WL_CONNECTED) 
@@ -122,31 +124,37 @@ void setup_wifi()
     delay(500);
       Serial.print(".");
   }
+
+  //WiFi.setDNS( badgerDNS, gatewayDNS );
   Serial.println("WiFi connected");
   Serial.print("Hostname: ");
   Serial.println( myHostname );
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+  Serial.print("DNS address 0: ");WiFi.dnsIP(0).printTo(Serial);Serial.println("");
+  Serial.println("DNS address 1: ");WiFi.dnsIP(1).printTo(Serial);Serial.println("");
 }
 
 void setup()
 {
   Serial.begin( 115200, SERIAL_8N1, SERIAL_TX_ONLY);
-  Serial.println();
   Serial.println(F("ESP starting."));
-
+  
+  //Start NTP client
+  configTime(TZ_SEC, DST_SEC, "pool.ntp.org");
+  
   //Setup timestruct
   now = time(nullptr);
-  
+
   // Connect to wifi 
   setup_wifi();                   
   
   //Open a connection to MQTT
-  client.setServer(mqtt_server, 1883);
-  client.connect(thisID, pubsubUserID, pubsubUserPwd ); 
-  
+  client.setServer( mqtt_server, 1883 );
+  client.connect( thisID, pubsubUserID, pubsubUserPwd ); 
   //Create a timer-based callback that causes this device to read the local i2C bus devices for data to publish.
-  client.setCallback(callback);
+  client.setCallback( callback );
+  client.subscribe( inTopic );
   
   //Pins mode and direction setup for i2c on ESP8266-01
   pinMode(0, OUTPUT);
@@ -164,10 +172,10 @@ void setup()
   // Autodetect is not working reliable, don't use the following line
   // dht.setup(17);
   // use this instead: 
-  dht.setup(3, DHTesp::DHT11); // Connect DHT sensor to GPIO 3
+  //dht.setup(3, DHTesp::DHT11); // Connect DHT sensor to GPIO 3
 
   Serial.print("Probe BMP280: ");
-  bmp280Present = bmp280.initialize();
+  //bmp280Present = bmp280.initialize();
   if ( !bmp280Present ) 
   {
     Serial.println("BMP280 Sensor missing");
@@ -179,30 +187,29 @@ void setup()
     bmp280.setEnabled(0);
     bmp280.triggerMeasurement();
   }
- 
+  
   Serial.println("Setup compass");
-  compassPresent = compass.begin();
-  if( !compassPresent ) // If there is an error, print it out.
-     Serial.println( "Compass not found");
+  //compassPresent = compass.begin();
+  //if( !compassPresent ) // If there is an error, print it out.
+  //   Serial.println( "Compass not found");
 
   //Setup webserver handler functions
   server.on("/", handleRoot);
-  server.onNotFound(handleNotFound);
-  
-  //Don't need a post handler yet
-  //server.onUpload();    
+  server.onNotFound(handleNotFound); 
   server.begin();
   
   //Setup timers
   //setup interrupt-based 'soft' alarm handler for periodic acquisition of new bearing
   ets_timer_setfn( &timer, onTimer, NULL ); 
   
-  //Setup sleep parameters
-  wifi_set_sleep_type(LIGHT_SLEEP_T);
-
   //fire timer every 250 msec
   //Set the timer function first
   ets_timer_arm_new( &timer, 250, 1/*repeat*/, 1);
+
+  //Setup sleep parameters
+  //wifi_set_sleep_type(LIGHT_SLEEP_T);
+
+  Serial.println( "Setup complete" );
 }
 
 //Timer handler for 'soft' 
@@ -216,18 +223,24 @@ void loop()
 {
   String timestamp;
   String output;
+  static int loopCount = 0;
   
   DynamicJsonBuffer jsonBuffer(256);
+  JsonObject& root = jsonBuffer.createObject();
 
-  if( newDataFlag) 
+  if( newDataFlag == true ) 
   {
-    getTimeAsString( timestamp );
-    
+    root["time"] = getTimeAsString( timestamp );
+    //Serial.println( getTimeAsString( timestamp ) );
+
+#ifndef _TESTING    
     //delay(dht.getMinimumSamplingPeriod());
-    if( dht11Present )
+    if( dht11Present && (loopCount++ > 4) )
     {
       humidity  = dht.getHumidity();
       aTemperature = dht.getTemperature();
+      dewpoint = dht.computeDewPoint( aTemperature, humidity, false );
+      loopCount = 0;
     }
     
     //Get the pressure and turn into dew point info
@@ -243,55 +256,30 @@ void loop()
       pressure = 103265.0;    
     }
     
-    // Retrieve the raw values from the compass (not scaled).
-    raw = compass.readRaw();  
-
     //generate output records
-    JsonObject& root = jsonBuffer.createObject();
-    root["time"] = "\"" + timestamp + "\"";
     if( compassPresent) 
     {
-      root["Bx"] = raw.XAxis;
-      root["By"] = raw.YAxis;
-      root["Bz"] = raw.ZAxis;
+      // Retrieve the raw values from the compass (not scaled).
+      raw = compass.readRaw();  
       bearing = 180.0/M_PI * atan2( raw.YAxis, raw.XAxis);
       bearing = ( bearing < 0.0F ) ? bearing+360.0F: bearing;
-      root["Bearing"] = bearing;
       cTemperature = compass.getTemperature();
-      root["Temperature"] = cTemperature;
     }
-    
-    if ( dht11Present )
-      dewpoint = dht.computeDewPoint( aTemperature, humidity, false );
-    
-    JsonArray& temps = root.createNestedArray("temperatures");
-    temps.add( aTemperature );
-    temps.add( bTemperature );
-    temps.add( cTemperature ) ;
-    root.printTo( output );
-
+#else
+    Serial.println(".");
+#endif
     newDataFlag = false;
   }  
-  
+
+  server.handleClient();
+ 
   if (!client.connected()) 
   {
     reconnect();
   }
-  
-  client.loop();
-}
+  else 
+    client.loop();
 
-String& getTimeAsString(String& output)
-{
-    //get time, maintained by NTP
-    struct tm* gnow = gmtime( &now );
-    output += String(gnow->tm_year + 1900) + ":" + \
-                   String(gnow->tm_mon) + ":" + \
-                   String(gnow->tm_mday) + ":" + \
-                   String(gnow->tm_hour) + ":" + \
-                   String(gnow->tm_min) + ":" + \
-                   String(gnow->tm_sec);
-    return output;
 }
 
   void handleNotFound()
@@ -313,20 +301,32 @@ String& getTimeAsString(String& output)
 
     root["time"] = getTimeAsString( timeString );
     if( dht11Present )
-      root["temperature"] = aTemperature;
-    if( dht11Present )  
-      root["humidity"] = humidity;
-    if( bmp280Present )  
-      root["pressure"] = pressure;
-    if( compassPresent)
     {
-      JsonArray& components = root.createNestedArray("Magnetic Fields");
-      components.add( raw.XAxis );
-      components.add( raw.YAxis );
-      components.add( raw.ZAxis );
+      root["Humidity"] = humidity;
+      root["Dewpoint"] = dewpoint;
     }
-    root.printTo(message);
 
+    if( bmp280Present )  
+    {
+      root["pressure"] = pressure;
+    }
+    
+    if ( compassPresent )
+    {
+      JsonArray& mags = root.createNestedArray("Magnetic Fields");
+      mags.add( raw.XAxis );
+      mags.add( raw.YAxis );
+      mags.add( raw.ZAxis );
+      root["Bearing"] = bearing;
+    }
+    
+    JsonArray& temps = root.createNestedArray("temperatures");
+    temps.add( aTemperature );
+    temps.add( bTemperature );
+    temps.add( cTemperature );
+
+    //root.printTo( Serial );
+    root.printTo(message);
     server.send(200, "application/json", message);
   }
 
@@ -346,9 +346,9 @@ void callback(char* topic, byte* payload, unsigned int length)
   DynamicJsonBuffer jsonBuffer(256);
   JsonObject& root = jsonBuffer.createObject();
 
+#ifndef _TESTING
   if( dht11Present)
   {
-    root["time"] = timestamp;
     root["temperature"] = aTemperature;
     root.printTo( output );
     outTopic = outSenseTopic;
@@ -369,9 +369,15 @@ void callback(char* topic, byte* payload, unsigned int length)
   {
     root.remove( "humidity/");
     root["pressure"] = pressure;
+    root["time"] = timestamp;
     root.printTo( output );
+    outTopic.concat(myHostname);
+    client.publish( outTopic.c_str(), output.c_str() );        
+    
     outTopic = outSenseTopic;
-    outTopic.concat("pressure/");
+    outTopic.concat("temperature/");
+    root["time"] = timestamp;
+    root.printTo( output );
     outTopic.concat(myHostname);
     client.publish( outTopic.c_str(), output.c_str() );        
   }
@@ -382,43 +388,25 @@ void callback(char* topic, byte* payload, unsigned int length)
     root["Bx"] = raw.XAxis;
     root["By"] = raw.YAxis;    
     root["Bz"] = raw.ZAxis;    
+    root["time"] = timestamp;
     root.printTo( output );
     outTopic = outSenseTopic;
     outTopic.concat("magneticField/");
     outTopic.concat(myHostname);
     client.publish( outTopic.c_str(), output.c_str() );           
   }
+#endif
+  
+  root["time"] = timestamp;
+  output = "Measurement published";
+  outTopic = outHealthTopic;
+  outTopic.concat( myHostname );
+  client.publish( outTopic.c_str(), output.c_str() );  
+  Serial.print( outTopic );Serial.print( " published: " ); Serial.println( output );
+
 }
 
-void reconnect() 
-{
-  String output;
-  // Loop until we're reconnected
-  while (!client.connected()) 
-  {
-    Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    if (client.connect(thisID, pubsubUserID, pubsubUserPwd )) 
-    {
-      /*
-      char* topic = (char*) malloc(sizeof(char) * (sizeof(outTopic) + sizeof("/") + sizeof(thisID) + 1) );
-      memcpy( topic, outTopic, sizeof(outTopic)-1);
-      memcpy( &topic[sizeof(outTopic)], "/", 1);
-      memcpy( &topic[sizeof(outTopic)+1], thisID, sizeof( thisID));
-      */            
-      Serial.println("connected");
-      // Once connected, publish an announcement...
-      output = (String)myHostname;
-      output.concat( " connected" );
-      client.publish( outHealthTopic, output.c_str() );
-      // ... and resubscribe
-      client.subscribe(inTopic);
-    }
-    else
-    {
-     // Serial.print("failed, rc=");
-      Serial.print(client.state());
-      /*
+/*
 Returns the current state of the client. If a connection attempt fails, this can be used to get more information about the failure.
 int - the client state, which can take the following values (constants defined in PubSubClient.h):
 -4 : MQTT_CONNECTION_TIMEOUT - the server didn't respond within the keepalive time
@@ -431,7 +419,30 @@ int - the client state, which can take the following values (constants defined i
 3 : MQTT_CONNECT_UNAVAILABLE - the server was unable to accept the connection
 4 : MQTT_CONNECT_BAD_CREDENTIALS - the username/password were rejected
 5 : MQTT_CONNECT_UNAUTHORIZED - the client was not authorized to connect
-       */
+*/
+
+void reconnect() 
+{
+  String output;
+  // Loop until we're reconnected
+  while (!client.connected()) 
+  {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect(thisID, pubsubUserID, pubsubUserPwd )) 
+    {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      output = (String)myHostname;
+      output.concat( " connected" );
+      client.publish( outHealthTopic, output.c_str() );
+      // ... and resubscribe
+      client.subscribe(inTopic);
+    }
+    else
+    {
+     // Serial.print("failed, rc=");
+      Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       for(int i = 0; i<5000; i++)
@@ -442,4 +453,18 @@ int - the client state, which can take the following values (constants defined i
       }
     }
   }
+}
+
+String& getTimeAsString(String& output)
+{
+    //get time, maintained by NTP
+    now = time(nullptr);
+    struct tm* gnow = gmtime( &now );
+    output += String(gnow->tm_year + 1900) + ":" + \
+                   String(gnow->tm_mon) + ":" + \
+                   String(gnow->tm_mday) + ":" + \
+                   String(gnow->tm_hour) + ":" + \
+                   String(gnow->tm_min) + ":" + \
+                   String(gnow->tm_sec);
+    return output;
 }
