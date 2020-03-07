@@ -1,0 +1,54 @@
+<!DocType html>
+<html lang=en >
+<head></head>
+<meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+  
+  <body>
+  <div class="container" >
+     <div class="row" id="topbar" bgcolor='A02222'>
+     <p> This is the setup page for the Skybadger <a href="https://www.ascom-standards.org">ASCOM</a> Switch device 'espRLY01' which uses the <a href="https://www.ascom-standards.org/api">ALPACA</a> v1.0 API</b>
+     </div>
+
+     <div class="row" id="errorbar" bgcolor='A02222'>
+     <b>    Error Message </b>
+     </div>
+  
+
+     <div class="row" id="deviceName" bgcolor='blue'>
+     <div class="col-sm-2">
+     <form method="POST" action="http://espRLY01/setup" >
+     <h2>Change hostname</h2>
+     <p>Changing the hostname for this device will cause the device to reboot and may change the IP address!</p>
+     <p>Enter new Hostname: <input type="text" name="hostname" value="espRLY01" > </p>
+
+     <h2> Update switches</h2>
+     <p>Upscaling will copy the existing setup to the new setup but you will need to edit the added switches. </p>
+     <p>Downscaling will delete the configuration for the switches dropped</p><br>
+     <p>New switch count: <input type="number" name="numSwitches" min="1" max="16" value="8"></p>
+     <input type="submit" value="Submit">
+     </form>
+     </div>
+    
+     <div class="col-sm-2"> 
+     <form action="http://espRLY01/setupSwitch">
+     <h2>Switch configuration </h2>
+     <br>
+     <p>In order to configure the switches, select the switch you need below.</p>
+
+      <input type="radio" name="switchNum" value="0" checked> 0 <br>
+      <input type="radio" name="switchNum" value="1" > 1 <br>
+      <input type="radio" name="switchNum" value="2" > 2 <br>
+      <input type="radio" name="switchNum" value="3" > 3 <br>
+      <input type="radio" name="switchNum" value="4" > 4 <br>
+      <input type="radio" name="switchNum" value="5" > 5 <br>
+      <input type="submit" value="Submit">
+      </div >   
+      </form>
+      </div>
+</body>
+</html>
