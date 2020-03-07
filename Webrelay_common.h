@@ -41,6 +41,7 @@ typedef struct
 } SwitchEntry;
 
 //UDP discovery service responder struct.
+#define ALPACA_DISCOVERY_PORT 32227
 struct DiscoveryPacket
  {
   const char* protocol = "alpadiscovery1" ;

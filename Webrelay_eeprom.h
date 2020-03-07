@@ -21,9 +21,19 @@ void setDefaults( void )
   int i=0;
   DEBUGSL1( "Eeprom setDefaults: entered");
 
+  if ( myHostname != nullptr ) 
+     free ( myHostname );
   myHostname = (char* )calloc( sizeof (char), MAX_NAME_LENGTH );
   strcpy( myHostname, defaultHostname);
 
+  //MQTT thisID copied from hostname
+  if ( thisID != nullptr ) 
+     free ( thisID );
+  thisID = (char*) calloc( MAX_NAME_LENGTH, sizeof( char)  );       
+  strcpy ( thisID, myHostname );
+
+  udpPort = ALPACA_DISCOVERY_PORT;
+  
   //Allocate storage for Number of Switch settings
   numSwitches = defaultNumSwitches;
   switchEntry = (SwitchEntry**) calloc( sizeof( SwitchEntry* ), numSwitches );
@@ -62,7 +72,7 @@ void saveToEeprom( void )
   DEBUGSL1( "savetoEeprom: Entered ");
    
   //Num Switches
-  EEPROM.put( eepromAddr = 1, numSwitches );
+  EEPROMWriteAnything( eepromAddr = 1, numSwitches );
   eepromAddr += sizeof(int);  
   DEBUGS1( "Written numSwitches: ");DEBUGSL1( numSwitches );
   
@@ -71,15 +81,15 @@ void saveToEeprom( void )
   {
     EEPROMWriteAnything( eepromAddr, switchEntry[i]->type );
     eepromAddr += sizeof( switchEntry[i]->type );    
-    EEPROMReadAnything( eepromAddr, switchEntry[i]->writeable );
+    EEPROMWriteAnything( eepromAddr, switchEntry[i]->writeable );
     eepromAddr += sizeof( switchEntry[i]->writeable );    
-    EEPROMReadAnything( eepromAddr, switchEntry[i]->min );
+    EEPROMWriteAnything( eepromAddr, switchEntry[i]->min );
     eepromAddr += sizeof( switchEntry[i]->min );
-    EEPROMReadAnything( eepromAddr, switchEntry[i]->max );
+    EEPROMWriteAnything( eepromAddr, switchEntry[i]->max );
     eepromAddr += sizeof( switchEntry[i]->max );
-    EEPROMReadAnything( eepromAddr, switchEntry[i]->step );
+    EEPROMWriteAnything( eepromAddr, switchEntry[i]->step );
     eepromAddr += sizeof( switchEntry[i]->step );
-    EEPROMReadAnything( eepromAddr, switchEntry[i]->value );
+    EEPROMWriteAnything( eepromAddr, switchEntry[i]->value );
     eepromAddr += sizeof( switchEntry[i]->value );
     
     EEPROMWriteString( eepromAddr, switchEntry[i]->switchName, MAX_NAME_LENGTH );
@@ -88,7 +98,9 @@ void saveToEeprom( void )
     EEPROMWriteString( eepromAddr, switchEntry[i]->description, MAX_NAME_LENGTH );
     eepromAddr += MAX_NAME_LENGTH * sizeof( char);    
   }
-
+  EEPROMWriteAnything( eepromAddr, udpPort );
+  eepromAddr += sizeof( udpPort );    
+  
   //hostname
   EEPROMWriteString( eepromAddr, myHostname, MAX_NAME_LENGTH );
   eepromAddr += MAX_NAME_LENGTH;  
@@ -99,6 +111,21 @@ void saveToEeprom( void )
   EEPROM.put( 0, magic );
 
   EEPROM.commit();
+
+  //Test readback of contents
+  String input = "";
+  char ch;
+  for ( int i = 0; i < 500 ; i++ )
+  {
+    ch = (char) EEPROM.read( i );
+    if ( ch == '\0' )
+      ch = '~';
+    if ( (i % 50 ) == 0 )
+      input.concat( "\n\r" );
+    input.concat( ch );
+  }
+  
+  Serial.printf( "EEPROM contents after: \n %s \n", input.c_str() );
   DEBUGSL1( "saveToEeprom: exiting ");
 }
 
@@ -153,12 +180,20 @@ void setupFromEeprom( void )
     eepromAddr += MAX_NAME_LENGTH * sizeof( char);    
   }  
 
+  EEPROMReadAnything( eepromAddr, udpPort );
+  eepromAddr += sizeof( udpPort );    
+
   //hostname - directly into variable array 
   if( myHostname != nullptr )
     free( myHostname );
   myHostname = (char*) calloc( MAX_NAME_LENGTH, sizeof( char ) );  
   EEPROMReadString( eepromAddr, myHostname, MAX_NAME_LENGTH );
   DEBUGS1( "Read hostname: ");DEBUGSL1( myHostname );
+
+  if ( thisID != nullptr ) 
+     free ( thisID );
+  thisID = (char*) calloc( MAX_NAME_LENGTH, sizeof( char)  );       
+  strcpy ( thisID, myHostname );
 
   DEBUGSL1( "setupFromEeprom: exiting" );
 }

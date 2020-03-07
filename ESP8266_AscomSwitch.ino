@@ -70,7 +70,8 @@ volatile bool callbackFlag = 0;
 ESP8266WebServer server(80);
 ESP8266HTTPUpdateServer updater;
 
-const int udpPort = 32227;
+//UDP Port can be edited in setup page
+int udpPort = ALPACA_DISCOVERY_PORT;
 WiFiUDP Udp;
 
 //Hardware device system functions - reset/restart etc
@@ -141,7 +142,9 @@ void setup()
   
   //Setup default data structures
   Serial.println("Setup EEprom variables"); 
-  setupFromEeprom();
+  setDefaults();
+  //saveToEeprom();
+  //setupFromEeprom();
   Serial.println("Setup eeprom variables complete."); 
   
   // Connect to wifi 
@@ -153,7 +156,7 @@ void setup()
   //Create a timer-based callback that causes this device to read the local i2C bus devices for data to publish.
   client.setCallback( callback );
   client.subscribe( inTopic );
-  //publishHealth();
+  publishHealth();
     
   //Pins mode and direction setup for i2c on ESP8266-01
   pinMode(0, OUTPUT);
@@ -235,7 +238,7 @@ void setup()
   //Setup timers
   //setup interrupt-based 'soft' alarm handler for periodic acquisition of new bearing
   ets_timer_setfn( &timer, onTimer, NULL ); 
-  ets_timer_setfn( &timer, onTimeoutTimer, NULL ); 
+  ets_timer_setfn( &timeoutTimer, onTimeoutTimer, NULL ); 
   
   //fire timer every 250 msec
   //Set the timer function first
