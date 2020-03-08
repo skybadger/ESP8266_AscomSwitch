@@ -36,6 +36,7 @@ void setDefaults( void )
   
   //Allocate storage for Number of Switch settings
   numSwitches = defaultNumSwitches;
+  
   switchEntry = (SwitchEntry**) calloc( sizeof( SwitchEntry* ), numSwitches );
   for ( i=0; i< numSwitches ; i++ )
   {
@@ -52,15 +53,31 @@ void setDefaults( void )
     tempName.concat( i );
     switchEntry[i]->switchName = (char*) calloc( MAX_NAME_LENGTH, sizeof(char) );
     strcpy( switchEntry[i]->switchName, tempName.c_str() );
-    
+    switchEntry[i]->writeable = true;    
     switchEntry[i]->type = SWITCH_RELAY_NO;
+    switchEntry[i]->pin = 0;
     switchEntry[i]->min = 0.0F;
     switchEntry[i]->max = 1.0F;
     switchEntry[i]->step = 1.0F;
     switchEntry[i]->value = 0.0F;
-    switchEntry[i]->writeable = true; 
   }
-
+#if defined DEBUG
+  //Read them back for checking  - also available via status command.
+  for ( i=0;i < numSwitches; i++ )
+  {
+    String output;
+    Serial.printf( " switch %i: \n" , i) ;
+    Serial.printf( "Desc %s \n" , switchEntry[i]->description );
+    Serial.printf( "Name %s \n" , switchEntry[i]->switchName );  
+    Serial.printf( "Type %i \n", switchEntry[i]->type );
+    Serial.printf( "Pin %i \n", switchEntry[i]->pin );
+    Serial.printf( "Min %f \n", switchEntry[i]->min );
+    Serial.printf( "Max %f \n", switchEntry[i]->max );
+    Serial.printf( "Step %f \n", switchEntry[i]->step );
+    Serial.printf( "Value %2.2 \n", switchEntry[i]->value ;
+    Serial.printf( "Writeable %i \n", switchEntry[i]->writeable);     
+  }
+#endif
   DEBUGSL1( "setDefaults: exiting" );
 }
 
@@ -81,6 +98,8 @@ void saveToEeprom( void )
   {
     EEPROMWriteAnything( eepromAddr, switchEntry[i]->type );
     eepromAddr += sizeof( switchEntry[i]->type );    
+    EEPROMWriteAnything( eepromAddr, switchEntry[i]->pin );
+    eepromAddr += sizeof( switchEntry[i]->pin );    
     EEPROMWriteAnything( eepromAddr, switchEntry[i]->writeable );
     eepromAddr += sizeof( switchEntry[i]->writeable );    
     EEPROMWriteAnything( eepromAddr, switchEntry[i]->min );
@@ -156,6 +175,8 @@ void setupFromEeprom( void )
   {
     EEPROMReadAnything( eepromAddr, switchEntry[i]->type );
     eepromAddr += sizeof( switchEntry[i]->type );
+    EEPROMReadAnything( eepromAddr, switchEntry[i]->pin );
+    eepromAddr += sizeof( switchEntry[i]->pin );
     EEPROMReadAnything( eepromAddr, switchEntry[i]->writeable );
     eepromAddr += sizeof( switchEntry[i]->writeable );    
     EEPROMReadAnything( eepromAddr, switchEntry[i]->min );

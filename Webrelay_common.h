@@ -28,11 +28,20 @@ const String DriverType = "Switch";
 const String switchTypes[] = {"PWM","Relay_NO","DAC","Relay_NC"};
 enum SwitchType { SWITCH_PWM, SWITCH_RELAY_NO, SWITCH_RELAY_NC, SWITCH_ANALG_DAC };
 
+/*
+ Typical values for PWM And ADC are 0 - 1024/1024, PWM in terms of fraction of the wave is high 
+ and DAC in terms of the output voltage as a fraction of Vcc. 
+ 
+ */
+//define the max resolution available to control a DAC or PWM
+#define MAX_DIGITAL_STEPS 1024 
+
 typedef struct 
 {
   char* description = nullptr;
   char* switchName = nullptr;
   enum SwitchType type = SWITCH_RELAY_NO;
+  int pin = -1; //Use for DAC and PWM outputs
   bool writeable = true;
   float min = 0.0;
   float max = 1.0;

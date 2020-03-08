@@ -208,12 +208,12 @@ void setup()
   server.on("/api/v1/switch/0/name",                HTTP_GET, handleNameGet );
   server.on("/api/v1/switch/0/supportedactions",    HTTP_GET, handleSupportedActionsGet );
 
-  //Switch-specifi functions
+  //Switch-specific functions
   server.on("/api/v1/switch/0/maxswitch",           HTTP_GET, handlerMaxswitch );
   server.on("/api/v1/switch/0/canwrite",            HTTP_GET, handlerCanWrite );
+  server.on("/api/v1/switch/0/getswitchdescription", HTTP_GET, handlerSwitchDescription );
   server.on("/api/v1/switch/0/getswitch",           HTTP_GET, handlerSwitchState );
   server.on("/api/v1/switch/0/setswitch",           HTTP_PUT, handlerSwitchState );
-  server.on("/api/v1/switch/0/getswitchdescription", HTTP_GET, handlerSwitchDescription );
   server.on("/api/v1/switch/0/getswitchname",       HTTP_GET, handlerSwitchName );
   server.on("/api/v1/switch/0/setswitchname",       HTTP_PUT, handlerSwitchName );  
   server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerSwitchType );
@@ -226,6 +226,7 @@ void setup()
 
 //Additional non-ASCOM custom setup calls
   server.on("/status",                              HTTP_GET, handlerStatus);
+  server.on("/api/v1/switch/0/status",              HTTP_ANY, handlerStatus );
   server.on("/api/v1/switch/0/setup",               HTTP_ANY, handlerSetup );
   server.on("/api/v1/switch/0/setup",               HTTP_ANY, handlerSetup );
   server.on("/api/v1/switch/0/setupSwitches",       HTTP_ANY, handlerSetupSwitches );
