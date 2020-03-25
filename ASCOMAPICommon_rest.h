@@ -25,6 +25,8 @@ void handleDescriptionGet(void);
 void handleDriverInfoGet(void);
 //GET /{DeviceType}/{DeviceNumber}/DriverVersion Driver Version
 void handleDriverVersionGet(void);
+//GET /{DeviceType}/{DeviceNumber}/InterfaceVersion Interface Version
+void handleInterfaceVersionGet(void);
 //GET /{DeviceType}/{DeviceNumber}/Name Device name
 void handleNameGet(void);
 //GET /{DeviceType}/{DeviceNumber}/SupportedActions Returns the list of action names supported by this driver.  
@@ -123,7 +125,7 @@ void handleCommandString(void)
     }
     else
     {
-      jsonResponseBuilder( root, clientID, transID, "CommandBool", notImplemented , "Not implemented" );
+      jsonResponseBuilder( root, clientID, transID, "CommandString", notImplemented , "Not implemented" );
       root["Value"]= false; 
       root.printTo(message);   
       server.send(200, "application/json", message);
@@ -266,6 +268,21 @@ void handleDriverVersionGet(void)
     JsonObject& root = jsonBuffer.createObject();
     jsonResponseBuilder( root, clientID, transID, "DriverVersion", Success , "" );    
     root["Value"]= DriverVersion;    
+    root.printTo(message);
+    server.send(200, "application/json", message);
+    return ;
+}
+
+void handleInterfaceVersionGet(void)
+{
+    String message;
+    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
+    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
+
+    DynamicJsonBuffer jsonBuffer(256);
+    JsonObject& root = jsonBuffer.createObject();
+    jsonResponseBuilder( root, clientID, transID, "InterfaceVersion", Success , "" );    
+    root["Value"]= InterfaceVersion;    
     root.printTo(message);
     server.send(200, "application/json", message);
     return ;

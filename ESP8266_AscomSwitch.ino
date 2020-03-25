@@ -6,22 +6,25 @@
  
  To do:
  Complete EEPROM calls
+ Add support for initial state settings on setup page and in eeprom.
  Complete Setup page
- Complete support for device-based PWM. I think its an all or nothing thing where a device talks to either a ban f on/off relays or a bank of PWM outputs and 
- current amplifier transistors
+ Complete support for device-based PWM. 
+ Complete support for DAC output
   
  Done: 
  PCF8574 library added to support switches - needs physical integration testing.
  Add suport for PWM hardware chip(s).
   
  Layout:
- Pin 13 to DHT data 
+ Pin 13 to PWM output
  GPIO 4,2 to SDA
  GPIO 5,0 to SCL 
  All 3.3v logic. 
  
 Test:
-curl -X PUT http://esprly01/api/v1/switch/0/Connected -d "ClientID=0&ClientTransactionID=0&Connected=true" (note cases)
+curl -X PUT http://espASW01/api/v1/switch/0/Connected -d "ClientID=0&ClientTransactionID=0&Connected=true" (note cases)
+http://espASW01/api/v1/switch/0/status
+telnet espASW01 32272 (UDP)
  */
 #include "DebugSerial.h"
 #include "SkybadgerStrings.h"
@@ -92,9 +95,10 @@ SwitchEntry** switchEntry;
 #include "PCF8574.h"
 //- TYPE      ADDRESS-RANGE
 //- PCF8574   0x20 to 0x27, 
-// PCF8574A  0x38 to 0x3F
-//TI 8574A is 0x70 to 0x7E, pullups add to base 0x7E
-PCF8574 switchDevice( 0x70, Wire );
+//  PCF8574A  0x38 to 0x3F
+//  TI 8574A is 0x70 to 0x7E, pullups on address pins add to base 0x70
+//  Waveshare expander board is address 160
+PCF8574 switchDevice( 160, Wire );
 bool switchPresent = false;
 uint32_t switchStatus = 0;
 
@@ -142,9 +146,7 @@ void setup()
   
   //Setup default data structures
   Serial.println("Setup EEprom variables"); 
-  setDefaults();
-  //saveToEeprom();
-  //setupFromEeprom();
+  setupFromEeprom();
   Serial.println("Setup eeprom variables complete."); 
   
   // Connect to wifi 
@@ -169,28 +171,45 @@ void setup()
   //I2C setup SDA pin 0, SCL pin 2 on ESP-01
   //I2C setup SDA pin 5, SCL pin 4 on ESP-12
   Wire.begin(0, 2);
-  Wire.setClock(100000 );//100KHz target rate
+  Wire.setClock(50000 );//100KHz target rate
   
   Serial.println("Setup relay controls");
   switchPresent = false;
   
   //initial switch state setup - set pins high to read inputs, drive pins low for low outputs. 
-  switchDevice.begin( (uint8_t) 0b00011100 );
-  if ( switchDevice.lastError() == 0 )
-    switchPresent = true;
-  else
+  switchDevice.begin( (const uint8_t) 0b11111111 );
+  switchPresent = ( switchDevice.lastError() != PCF8574_OK );
+  if ( !switchPresent )
   {
-    Serial.printf( "ASCOMSwitch : Unable to find PCF8574 switch device ");
+    Serial.printf( "ASCOMSwitch : Unable to find PCF8574 switch device \n");
     String msg = scanI2CBus();
     Serial.println( msg );
+  }
+  else
+  {
+    switchDevice.write(0, 1);delay(1000);
+    switchDevice.write(0, 0);delay(1000);
+    switchDevice.write(0, 1);
   }
     
   for ( int i=0;i< numSwitches ; i++ )
   {
-    if( strcasecmp( switchEntry[i]->description, "Relay" ) == 0 ) 
-      switchEntry[i]->value = ( switchDevice.read( i ) == 1 )? 1.0F: 0.0F ;
+    switch (switchEntry[i]->type)
+    {
+      case SWITCH_RELAY_NC:
+      case SWITCH_RELAY_NO:
+        switchEntry[i]->value = ( switchDevice.read( i ) == 1 )? 1.0F: 0.0F ;
+        break;
+      case SWITCH_PWM:
+      case SWITCH_ANALG_DAC:
+        switchEntry[i]->value = switchEntry[i]->value; //TO do - read digital value back from pin
+        break;
+      default:
+        break;
+    }
   }
   switchStatus  = switchDevice.read8();
+  DEBUGS1( "switchStatus: "); DEBUGSL1( switchStatus );
 
   //Setup webserver handler functions
   server.on("/", handlerStatus );
@@ -200,11 +219,12 @@ void setup()
   server.on("/api/v1/switch/0/action",              HTTP_PUT, handleAction );
   server.on("/api/v1/switch/0/commandblind",        HTTP_PUT, handleCommandBlind );
   server.on("/api/v1/switch/0/commandbool",         HTTP_PUT, handleCommandBool );
-  server.on("/api/v1/switch/0/commandstring",       HTTP_GET, handleCommandString );
+  server.on("/api/v1/switch/0/commandstring",       HTTP_PUT, handleCommandString );
   server.on("/api/v1/switch/0/connected",           handleConnected );
   server.on("/api/v1/switch/0/description",         HTTP_GET, handleDescriptionGet );
   server.on("/api/v1/switch/0/driverinfo",          HTTP_GET, handleDriverInfoGet );
   server.on("/api/v1/switch/0/driverversion",       HTTP_GET, handleDriverVersionGet );
+  server.on("/api/v1/switch/0/interfaceversion",    HTTP_GET, handleInterfaceVersionGet );
   server.on("/api/v1/switch/0/name",                HTTP_GET, handleNameGet );
   server.on("/api/v1/switch/0/supportedactions",    HTTP_GET, handleSupportedActionsGet );
 
@@ -299,6 +319,7 @@ void loop()
   else
   {
     reconnectNB();
+    client.subscribe (inTopic);
   }
   
   //Handle web requests
@@ -344,7 +365,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   outTopic = outHealthTopic;
   outTopic.concat( myHostname );
   client.publish( outTopic.c_str(), output.c_str() );  
-  Serial.printf( "topic: %s, published with value %s ", outTopic.c_str(), output.c_str() );
+  Serial.printf( "topic: %s, published with value %s \n", outTopic.c_str(), output.c_str() );
  }
  
  void handleDiscovery( int udpBytesCount )

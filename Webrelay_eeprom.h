@@ -61,23 +61,27 @@ void setDefaults( void )
     switchEntry[i]->step = 1.0F;
     switchEntry[i]->value = 0.0F;
   }
-#if defined DEBUG
+
+//#if defined DEBUG
   //Read them back for checking  - also available via status command.
+  Serial.printf( "Switches %i: \n" , numSwitches );
+  Serial.printf( "Hostname %s: \n" , myHostname );
+  Serial.printf( "Discovery port %i: \n" , udpPort );
   for ( i=0;i < numSwitches; i++ )
   {
     String output;
-    Serial.printf( " switch %i: \n" , i) ;
+    Serial.printf( "Switch %i: \n" , i) ;
     Serial.printf( "Desc %s \n" , switchEntry[i]->description );
     Serial.printf( "Name %s \n" , switchEntry[i]->switchName );  
     Serial.printf( "Type %i \n", switchEntry[i]->type );
     Serial.printf( "Pin %i \n", switchEntry[i]->pin );
-    Serial.printf( "Min %f \n", switchEntry[i]->min );
-    Serial.printf( "Max %f \n", switchEntry[i]->max );
-    Serial.printf( "Step %f \n", switchEntry[i]->step );
-    Serial.printf( "Value %2.2 \n", switchEntry[i]->value ;
-    Serial.printf( "Writeable %i \n", switchEntry[i]->writeable);     
+    Serial.printf( "Min %2.2f \n", switchEntry[i]->min );
+    Serial.printf( "Max %2.2f \n", switchEntry[i]->max );
+    Serial.printf( "Step %2.2f \n", switchEntry[i]->step );
+    Serial.printf( "Value %2.2f \n", switchEntry[i]->value );
+    Serial.printf( "Writeable %i \n", switchEntry[i]->writeable );     
   }
-#endif
+//#endif
   DEBUGSL1( "setDefaults: exiting" );
 }
 
@@ -93,6 +97,11 @@ void saveToEeprom( void )
   eepromAddr += sizeof(int);  
   DEBUGS1( "Written numSwitches: ");DEBUGSL1( numSwitches );
   
+  //UDP Port
+  EEPROMWriteAnything( eepromAddr, udpPort );
+  eepromAddr += sizeof(int);  
+  DEBUGS1( "Written udpPort: ");DEBUGSL1( udpPort );
+
   //Switch state
   for ( int i = 0; i< numSwitches; i++ )
   {
@@ -117,8 +126,6 @@ void saveToEeprom( void )
     EEPROMWriteString( eepromAddr, switchEntry[i]->description, MAX_NAME_LENGTH );
     eepromAddr += MAX_NAME_LENGTH * sizeof( char);    
   }
-  EEPROMWriteAnything( eepromAddr, udpPort );
-  eepromAddr += sizeof( udpPort );    
   
   //hostname
   EEPROMWriteString( eepromAddr, myHostname, MAX_NAME_LENGTH );
@@ -153,12 +160,12 @@ void setupFromEeprom( void )
   int eepromAddr = 0;
     
   DEBUGSL1( "setUpFromEeprom: Entering ");
-  
+  byte myMagic = '\0';
   //Setup internal variables - read from EEPROM.
-  EEPROM.get( eepromAddr=0, magic );
-  DEBUGS1( "Read magic: ");DEBUGSL1( magic );
+  EEPROM.get( eepromAddr=0, myMagic );
+  DEBUGS1( "Read magic: ");DEBUGSL1( myMagic );
   
-  if ( (byte) magic != '*' ) //initialise
+  if ( (byte) myMagic != magic ) //initialise
   {
     setDefaults();
     saveToEeprom();
@@ -169,7 +176,11 @@ void setupFromEeprom( void )
   //Num Switches 
   EEPROM.get( eepromAddr = 1, numSwitches );
   eepromAddr  += sizeof(int);
-  
+
+  //UDP port 
+  EEPROM.get( eepromAddr, udpPort );
+  eepromAddr  += sizeof(int);
+
   //switch entries
   for ( int i=0; i< numSwitches; i++ )
   {
@@ -201,9 +212,6 @@ void setupFromEeprom( void )
     eepromAddr += MAX_NAME_LENGTH * sizeof( char);    
   }  
 
-  EEPROMReadAnything( eepromAddr, udpPort );
-  eepromAddr += sizeof( udpPort );    
-
   //hostname - directly into variable array 
   if( myHostname != nullptr )
     free( myHostname );
@@ -211,6 +219,7 @@ void setupFromEeprom( void )
   EEPROMReadString( eepromAddr, myHostname, MAX_NAME_LENGTH );
   DEBUGS1( "Read hostname: ");DEBUGSL1( myHostname );
 
+  //Setup MQTT client id based on hostname
   if ( thisID != nullptr ) 
      free ( thisID );
   thisID = (char*) calloc( MAX_NAME_LENGTH, sizeof( char)  );       

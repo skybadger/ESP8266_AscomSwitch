@@ -4,6 +4,10 @@ ASCOM project common variables
 #ifndef _WEBRELAY_COMMON_H_
 #define _WEBRELAY_COMMON_H_
 
+#if !defined DEBUG
+#define DEBUG
+#endif 
+
 const int MAX_NAME_LENGTH = 25;
 #define DEFAULT_NUM_SWITCHES 8;
 const int defaultNumSwitches = DEFAULT_NUM_SWITCHES;

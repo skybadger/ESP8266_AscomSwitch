@@ -1,22 +1,31 @@
 /*
 ESP8266_relayhandler.h
-This doc is a set of functions to handle the webb server functions for the esp8266_relay ASCOM switch interface.
-There can be more than one switch. Hence the setup allows specifying the device umber and the host/device name.
+This is a firmware application to implement the ASCOM ALPACA switch interface API.
+Each device can manage more than one switch - up to numswitches which is user configured.
+Each nominal switch can be 1 of 4 types - binary relays (no and nc) and digital pwm and DAC outputs.
+Hence the setup allows specifying the number of switches per device and the host/device name.
 This particular switch device assumes the use of port pins allocated from the device via a pcf8574 I2C port expansion device. 
-Use of the PWM port type is going to need a more intelligence device such as a larger ESP8266 device. 
-Use of a DAC requires (presumably) an i2C DAC 
+Using an ESP8266-01 this leaves one pin free to be a digital device. 
+Using an ESP8266-12 this leaves a number of pins free to be a digital device.
+Use of a DAC requires (presumably) an i2C DAC or an onboard DAC tied to a pin.
 
 In use of the ASCOM Api 
-All URLs include an argument 'Id' which contais the number of the unit attached to this switch instance
+All URLs include an argument 'Id' which contains the number of the switch attached to this device instance
 The switch device number is in the path itself. Hence the getUriField function
-Internally this code keeps the state of the switch in doubles and uses (value != 1.0F) to mean false. 
+Internally this code keeps the state of the switch in the switchEntry structure and uses (value != 1.0F) to mean false. 
 
  To do:
  Debug, trial
  
- Layout:
+ Layout: 
+ (ESP8266-12)
  GPIO 4,2 to SDA
  GPIO 5,0 to SCL 
+ (ESP8266-01)
+ GPIO 0 - SDA
+ GPIO 1 - Rx - re-use as PWM output for testing purposes
+ GPIO 2 - SCL
+ GPIO 3 - Tx
  All 3.3v logic. 
   
 */
@@ -36,6 +45,11 @@ void initSwitch( SwitchEntry* targetSe );
 SwitchEntry* reSize( SwitchEntry* old, int newSize );
 bool getUriField( char* inString, int searchIndex, String& outRef );
 String& setupFormBuilder( String& htmlForm, String& errMsg );
+void handlerMaxswitch(void);
+void handlerCanWrite(void);
+void handlerSwitchState(void);
+void handlerSwitchDescription(void);
+void handlerSwitchName(void);
 
 /*
  * This function will write a copy of the provided deviceEntry structure into the internal memory array. 
@@ -263,15 +277,13 @@ void handlerSwitchState(void)
         {
           case SWITCH_RELAY_NO:
           case SWITCH_RELAY_NC:
-            if( server.arg( argToSearchFor[1] ).equalsIgnoreCase( "true" ) )
-              newState = true;
-            else
-              newState = false;
-              if ( newState != bValue )
-              {
-                switchDevice.write( switchID, newState );
-                switchEntry[switchID]->value = (newState)? 1.0F: 0.0F;
-              }
+              DEBUGSL1( "Found relay to set");
+              if( server.arg( argToSearchFor[1] ).equalsIgnoreCase( "true" ) )
+                newState = true;
+              else
+                newState = false;
+              switchDevice.write( switchID, (newState) ? 1 : 0 );
+              switchEntry[switchID]->value = (newState)? 1.0F : 0.0F;
               returnCode = 200;              
             break;
           case SWITCH_PWM:
@@ -363,7 +375,48 @@ void handlerSwitchName(void)
     jsonResponseBuilder( root, clientID, transID, "SwitchName", Success, "" );    
     
     if( hasArgIC( argToSearchFor[0], server, false ) )
+    {
       switchID = server.arg(argToSearchFor[0]).toInt();
+      if ( switchID >= 0 && switchID < numSwitches  )
+      {
+        if ( server.method() == HTTP_GET )
+        {
+            root["Value"] = switchEntry[switchID]->switchName;
+            returnCode = 200;
+        }
+        else if( server.method() == HTTP_PUT && hasArgIC( argToSearchFor[1], server, false ) )
+        {
+            int sLen = strlen( server.arg( argToSearchFor[1] ).c_str() );
+            if ( sLen > MAX_NAME_LENGTH -1 )
+            {
+              root["ErrorMessage"]= "Switch name too long";
+              root["ErrorNumber"] = invalidValue ;
+              returnCode = 400;
+            }
+            else
+            {
+              if ( switchEntry[switchID]->switchName != nullptr ) 
+                free( switchEntry[switchID]->switchName );
+              switchEntry[switchID]->switchName  = (char*) calloc( MAX_NAME_LENGTH, sizeof(char) );
+              strcpy( switchEntry[switchID]->switchName, server.arg( argToSearchFor[1] ).c_str() );
+            }                    
+        }
+        else
+        {
+           //Invalid http verb 
+           returnCode = 400;
+           root["ErrorMessage"]= "Invalid HTTP verb found";
+           root["ErrorNumber"] = invalidOperation;
+        }
+      }
+      else
+      {
+        //invalid switch id 
+        returnCode = 400;
+        root["ErrorMessage"]= "Invalid switch ID - outside range";
+        root["ErrorNumber"] = invalidValue ;
+      }
+    }
     else
     {
       //invalid switch id 
@@ -371,51 +424,13 @@ void handlerSwitchName(void)
       root["ErrorMessage"]= "Missing switch ID";
       root["ErrorNumber"] = invalidOperation ;
     }
-    
-    if ( switchID >= 0 && switchID < numSwitches  )
-    {
-      if ( server.method() == HTTP_GET )
-      {
-          root["Value"] = switchEntry[switchID]->switchName;
-          returnCode = 200;
-      }
-      else if( server.method() == HTTP_PUT && hasArgIC( argToSearchFor[1], server, false ) )
-      {
-          int sLen = strlen( server.arg( argToSearchFor[1] ).c_str() );
-          if ( sLen > MAX_NAME_LENGTH -1 )
-          {
-            root["ErrorMessage"]= "Switch name too long";
-            root["ErrorNumber"] = invalidValue ;
-            returnCode = 400;
-          }
-          else
-          {
-            if ( switchEntry[switchID]->switchName != nullptr ) 
-              free( switchEntry[switchID]->switchName );
-            switchEntry[switchID]->switchName  = (char*) calloc( MAX_NAME_LENGTH, sizeof(char) );
-            strcpy( switchEntry[switchID]->switchName, server.arg( argToSearchFor[1] ).c_str() );
-          }                    
-      }
-      else
-      {
-         //Invalid http verb 
-         returnCode = 400;
-         root["ErrorMessage"]= "Invalid HTTP verb found";
-         root["ErrorNumber"] = invalidOperation;
-      }
-    }
-    else
-    {
-      //invalid switch id 
-      returnCode = 400;
-      root["ErrorMessage"]= "Invalid switch ID - outside range";
-      root["ErrorNumber"] = invalidValue ;
-    }
+
     root.printTo(message);
     server.send(returnCode, "text/json", message);
     return;
 }
 
+//Non-ascom function
 //GET ​/switch​/{device_number}​/getswitchtype
 //PUT ​/switch​/{device_number}​/setswitchtype
 //Get/set the name of the specified switch device
@@ -607,18 +622,18 @@ void handlerMinSwitchValue(void)
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
     int returnCode = 200;
-    uint32_t switchID  = -1;
+    int switchID  = -1;
     String argToSearchFor = "id";
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "MinSwitchValue", 0, "" );    
+    jsonResponseBuilder( root, clientID, transID, "MinSwitchValue", Success, "" );    
     
     if ( hasArgIC( argToSearchFor, server, false  ) )
     {
       switchID = server.arg( argToSearchFor ).toInt();
       if( switchID >= 0 && switchID < numSwitches )
-        root["Value"] = switchEntry[switchID]->min;
+        root.set("Value", switchEntry[switchID]->min );
       else
       {
         root["ErrorMessage"] = "SwitchID value out of range.";
@@ -645,7 +660,7 @@ void handlerMaxSwitchValue(void)
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
     int returnCode = 200;
-    uint32_t switchID  = -1;
+    int switchID  = -1;
     String argToSearchFor = "Id";
     
     DynamicJsonBuffer jsonBuffer(256);
@@ -657,7 +672,7 @@ void handlerMaxSwitchValue(void)
       switchID = server.arg(argToSearchFor).toInt();
       if ( switchID >= 0 && switchID < numSwitches )
       {
-        root["value"] = switchEntry[switchID]->max;
+        root["value"] = (double) switchEntry[switchID]->max;
         returnCode = 200;
       }
       else
