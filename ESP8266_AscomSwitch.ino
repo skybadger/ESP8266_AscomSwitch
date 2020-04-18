@@ -5,16 +5,24 @@
  Supports web interface on port 80 returning json string
  
  To do:
- Complete EEPROM calls
- Add support for initial state settings on setup page and in eeprom.
- Complete Setup page
+  Complete Setup page - in progress
  Complete support for device-based PWM. 
  Complete support for DAC output
   
  Done: 
+ Complete EEPROM calls - done.
  PCF8574 library added to support switches - needs physical integration testing.
  Add suport for PWM hardware chip(s).
-  
+ 8574 DIP16 pinout is: 
+ 1 A0       15 Vdd
+ 2 A1       15 SDA
+ 3 A2       14 SCL
+ 4 P0       13 /INT
+ 5 P1       12 P7
+ 6 P2       11 P6
+ 7 P3       10 P5
+ 8 Vss      09 P4
+
  Layout:
  Pin 13 to PWM output
  GPIO 4,2 to SDA
@@ -66,7 +74,7 @@ char* thisID = nullptr;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-volatile bool callbackFlag = 0;
+volatile bool callbackFlag = false;
 
 // Create an instance of the server
 // specify the port to listen on as an argument
@@ -91,7 +99,7 @@ void onTimeoutTimer(void);
 int numSwitches = 0;
 SwitchEntry** switchEntry;
 
-//Dome shutter control via I2C Port Expander PCF8574
+//8-bit port control via I2C Port Expander PCF8574
 #include "PCF8574.h"
 //- TYPE      ADDRESS-RANGE
 //- PCF8574   0x20 to 0x27, 
@@ -102,6 +110,7 @@ PCF8574 switchDevice( 160, Wire );
 bool switchPresent = false;
 uint32_t switchStatus = 0;
 
+//Order sensitive
 #include "Skybadger_common_funcs.h"
 #include "JSONHelperFunctions.h"
 #include "ASCOMAPICommon_rest.h" //ASCOM common driver web handlers. 
@@ -143,16 +152,20 @@ void setup()
   
   //Start NTP client
   configTime(TZ_SEC, DST_SEC, timeServer1, timeServer2, timeServer3 );
+  delay( 5000);
   
   //Setup default data structures
-  Serial.println("Setup EEprom variables"); 
+  DEBUGSL1("Setup EEprom variables"); 
+  EEPROM.begin(700);
+  //setDefaults();
   setupFromEeprom();
-  Serial.println("Setup eeprom variables complete."); 
+  DEBUGSL1("Setup eeprom variables complete."); 
   
   // Connect to wifi 
   setup_wifi();                   
   
   //Open a connection to MQTT
+  DEBUGSL1("Setting up MQTT."); 
   client.setServer( mqtt_server, 1883 );
   client.connect( thisID, pubsubUserID, pubsubUserPwd ); 
   //Create a timer-based callback that causes this device to read the local i2C bus devices for data to publish.
@@ -163,35 +176,38 @@ void setup()
   //Pins mode and direction setup for i2c on ESP8266-01
   pinMode(0, OUTPUT);
   pinMode(2, OUTPUT);
-  //GPIO 3 (normally RX on -01) swap the pin to a GPIO. Use it for the DHT 
-  pinMode(3, OUTPUT);
-  
-  //pinMode(12, INPUT_PULLUP); disable for DHT  - let DHT class address
+  //GPIO 3 (normally RX on -01) swap the pin to a GPIO or PWM. 
+  pinMode(3, OUTPUT );
   
   //I2C setup SDA pin 0, SCL pin 2 on ESP-01
   //I2C setup SDA pin 5, SCL pin 4 on ESP-12
   Wire.begin(0, 2);
-  Wire.setClock(50000 );//100KHz target rate
+  Wire.setClock(100000 );//100KHz target rate
   
-  Serial.println("Setup relay controls");
+  DEBUGSL1("Setup relay controls");
   switchPresent = false;
   
   //initial switch state setup - set pins high to read inputs, drive pins low for low outputs. 
   switchDevice.begin( (const uint8_t) 0b11111111 );
-  switchPresent = ( switchDevice.lastError() != PCF8574_OK );
-  if ( !switchPresent )
+  DEBUGS1("Switch device - lastError is ");DEBUGSL1( switchDevice.lastError() );
+  if ( switchDevice.lastError()!= PCF8574_OK )
   {
-    Serial.printf( "ASCOMSwitch : Unable to find PCF8574 switch device \n");
+    switchPresent = false;
+    DEBUGSL1( "ASCOMSwitch : Unable to find PCF8574 switch device \n");
     String msg = scanI2CBus();
-    Serial.println( msg );
+    DEBUGSL1( msg );
   }
   else
   {
+    switchPresent = true;
+    //Toggle a LED to indicae we're working
     switchDevice.write(0, 1);delay(1000);
     switchDevice.write(0, 0);delay(1000);
     switchDevice.write(0, 1);
+    DEBUGSL1( "ASCOMSwitch : PCF8574 switch device found\n");
   }
     
+  DEBUGSL1( "ASCOMSwitch : Setting up switches from components \n");
   for ( int i=0;i< numSwitches ; i++ )
   {
     switch (switchEntry[i]->type)
@@ -202,7 +218,7 @@ void setup()
         break;
       case SWITCH_PWM:
       case SWITCH_ANALG_DAC:
-        switchEntry[i]->value = switchEntry[i]->value; //TO do - read digital value back from pin
+        switchEntry[i]->value = switchEntry[i]->value; //TO do - read digital value back from pin ?
         break;
       default:
         break;
@@ -216,6 +232,11 @@ void setup()
   server.onNotFound(handlerNotFound); 
   
   //Common ASCOM handlers
+  String preUri = "/api/v1/";
+  preUri += ASCOM_DEVICE_TYPE;
+  preUri += "/";
+  preUri += instanceNumber;
+  preUri += "/";
   server.on("/api/v1/switch/0/action",              HTTP_PUT, handleAction );
   server.on("/api/v1/switch/0/commandblind",        HTTP_PUT, handleCommandBlind );
   server.on("/api/v1/switch/0/commandbool",         HTTP_PUT, handleCommandBool );
@@ -236,8 +257,6 @@ void setup()
   server.on("/api/v1/switch/0/setswitch",           HTTP_PUT, handlerSwitchState );
   server.on("/api/v1/switch/0/getswitchname",       HTTP_GET, handlerSwitchName );
   server.on("/api/v1/switch/0/setswitchname",       HTTP_PUT, handlerSwitchName );  
-  server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerSwitchType );
-  server.on("/api/v1/switch/0/setswitchtype",       HTTP_PUT, handlerSwitchType );
   server.on("/api/v1/switch/0/getswitchvalue",      HTTP_GET, handlerSwitchValue );
   server.on("/api/v1/switch/0/setswitchvalue",      HTTP_PUT, handlerSwitchValue );
   server.on("/api/v1/switch/0/minswitchvalue",      HTTP_GET, handlerMinSwitchValue );
@@ -245,13 +264,17 @@ void setup()
   server.on("/api/v1/switch/0/switchstep",          HTTP_GET, handlerSwitchStep );
 
 //Additional non-ASCOM custom setup calls
+  server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerSwitchType );
+  server.on("/api/v1/switch/0/setswitchtype",       HTTP_PUT, handlerSwitchType );
+  server.on("/setup",                               HTTP_ANY, handlerSetup );
   server.on("/status",                              HTTP_GET, handlerStatus);
+  server.on("/restart",                             HTTP_GET, handlerRestart);
   server.on("/api/v1/switch/0/status",              HTTP_ANY, handlerStatus );
-  server.on("/api/v1/switch/0/setup",               HTTP_ANY, handlerSetup );
   server.on("/api/v1/switch/0/setup",               HTTP_ANY, handlerSetup );
   server.on("/api/v1/switch/0/setupSwitches",       HTTP_ANY, handlerSetupSwitches );
   updater.setup( &server );
   server.begin();
+  DEBUGSL1("Web server handlers setup & started");
   
   //Starts the discovery responder server
   Udp.begin( udpPort);

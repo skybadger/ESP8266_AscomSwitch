@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title></title>
+  <meta name="author" content="Skybadger">
+  <meta name="description" content="Settings page for ASCOM ALPACA compliant astronomy device">
+<style>  
+h1 { margin-top: 0; }
+ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+form {
+    margin: 0 auto;
+    width: 400px;
+    padding: 1em;
+    border: 1px solid #CCC;
+    border-radius: 1em;
+}
+
+div+div {
+    margin-top: 1em;
+}
+
+label span {
+    display: inline-block;
+    width: 120px;
+    text-align: right;
+}
+
+input, textarea {
+    font: 1em sans-serif;
+    width: 250px;
+    box-sizing: border-box;
+    border: 1px solid #999;
+}
+
+input[type=checkbox], input[type=radio] {
+    width: auto;
+    border: none;
+}
+
+input:focus, textarea:focus {
+    border-color: #000;
+}
+
+textarea {
+    vertical-align: top;
+    height: 5em;
+    resize: vertical;
+}
+
+fieldset {
+    width: 250px;
+    box-sizing: border-box;
+    margin-left: 136px;
+    border: 1px solid #999;
+}
+
+button {
+    margin: 20px 0 0 124px;
+}
+
+label {
+  position: relative;
+}
+
+label em {
+  position: absolute;
+  right: 5px;
+  top: 20px;
+}
+</style>
+</head>
+<script>
+//Used to enable/disable the input fields for binary relays vs digital PWM and DAC outputs. 
+function setTypes( a ) {
+  var searchFor = "types"+a;
+  var x = document.getElementById(searchFor).value;
+  if( x.indexOf( "PWM" ) > 0 || x.indexOf( "DAC" ) > 0 )
+  {
+      document.getElementById("pin").disabled = false;
+      document.getElementById("min").disabled = false;
+      document.getElementById("max").disabled = false;
+      document.getElementById("step").disabled = false;
+  }
+  else
+  {
+      document.getElementById("pin").disabled = true;
+      document.getElementById("min").disabled = true;
+      document.getElementById("max").disabled = true;
+      document.getElementById("step").disabled = true;  
+  }
+}
+
+</script>
+<body>
+<section>
+<form action="/api/v1/switch/0/setupshared">
+<h2>Setup the device.</h2>
+<p></p>
+<p>Below are a set of switch descriptions. Each device has a set of switches attached to it that you can configure.
+For the binary components - relays - which can only be off or on , the inputs for min/max/step are disabled.
+For the digital components - PWM and DAC units - which can have a range of values, these are enabled.</p>
+Be careful that when you describe a switch as a digital unit, it really is, and the device supports this mode of operation.
+<p>Changing the hostname or UDP DIscovery port will reboot the device.</p>
+
+   <fieldset>
+     <legend>Shared device settings</legend>
+     <label for="hostname">Hostname</label>
+     <input type="text" id="hostname" name="hostname" value="espASW01" maxlength="25"><br>
+     <label for="discoveryport">UDP Discovery port</label>
+     <input type="number" id="discoveryport" name="discoveryport" value="32272" min="1024" max="32767"><br>
+     <input type="submit" value="Submit">
+   </fieldset>  
+</form>
+</section>
+<section>
+<form action="/api/v1/switch/0/setupswitch">
+   <input type="hidden" value="0" name="switchID" />
+   <fieldset>
+      <legend>Settings Switch 0</legend>
+      <label for="fname"><span>Switch Name</span></label>
+      <input type="text" id="fname" name="fname" value="USB3 hub" maxlength="25"><br>
+     
+      <label for="lname"><span>Description</span></label>
+      <input type="text" id="lname" name="lname" value="Fitted to scope" maxlength="25"><br>
+
+      <label for="types"><span>Switch type</span></label>
+      <select id="types0" name="Relay_types" onChange="setTypes( 0 )">
+        <option value="SWITCH_NC">Relay (NC)</option>
+        <option value="SWITCH_NO">Relay (NO)</option>
+        <option value="SWITCH_PWM">PWM</option>
+        <option value="SWITCH_DAC">DAC</option>
+      </select> <br>
+
+      <label for="pin"><span>Hardware pin</span></label>
+      <input disabled type="number" id="pin" name="pin" value="9" min="0" max="16"><br>
+      <label for="min"><span>Switch min value</span></label>
+      <input type="number" id="min" name="min" value="0.0" min="0.0" max="1.0" disabled><br>
+      <label for="max"><span>Switch max value</span></label>
+      <input type="number" id="max" name="max" value="1.0" min="0.0" max="1.0" disabled><br>
+      <label for="step"><span>Switch steps in range</span></label>
+      <input type="number" id="step" name="step" value="1" min="0" max="1024" disabled ><br>
+   	<input type="submit" value="Submit">
+	</fieldset>  
+</form> 
+</section
+</body>
+</html>

@@ -45,6 +45,7 @@ void initSwitch( SwitchEntry* targetSe );
 SwitchEntry* reSize( SwitchEntry* old, int newSize );
 bool getUriField( char* inString, int searchIndex, String& outRef );
 String& setupFormBuilder( String& htmlForm, String& errMsg );
+
 void handlerMaxswitch(void);
 void handlerCanWrite(void);
 void handlerSwitchState(void);
@@ -65,6 +66,7 @@ void copySwitch( SwitchEntry* sourceSe, SwitchEntry* targetSe )
     targetSe->max         = sourceSe->max;
     targetSe->step        = sourceSe->step;
     targetSe->value       = sourceSe->value;
+    targetSe->pin         = sourceSe->pin;
 }
 
 void initSwitch( SwitchEntry* targetSe )
@@ -76,12 +78,13 @@ void initSwitch( SwitchEntry* targetSe )
     output = "Switch Name";
     strncpy( targetSe->switchName, output.c_str(), MAX_NAME_LENGTH);
 
-    targetSe->writeable   = false;
+    targetSe->writeable   = true;
     targetSe->type        = SWITCH_RELAY_NO;
     targetSe->min         = 0.0F;
     targetSe->max         = 0.0F;
     targetSe->step        = 1.0F;
     targetSe->value       = 0.0F;
+    targetSe->pin         = 0;
 }
 /*
  * This function re-sizes the existing switchEntry array by re-allocating memory and copying if required. 
@@ -116,7 +119,7 @@ SwitchEntry** reSize( SwitchEntry** old, int newSize )
        pse[i] = old[i];      
     for ( ; i < newSize; i++ )
     {
-      newse = (SwitchEntry*) malloc( sizeof (SwitchEntry)  );
+      newse = (SwitchEntry*) calloc( sizeof (SwitchEntry), 1 );
       newse->description = (char*)calloc( MAX_NAME_LENGTH, sizeof(char) );
       newse->switchName = (char*)calloc( MAX_NAME_LENGTH, sizeof(char) );
       pse[i] = newse;
@@ -216,7 +219,7 @@ void handlerCanWrite(void)
 
 //GET ​/switch​/{device_number}​/getswitch
 //PUT ​/switch​/{device_number}​/setswitch
-//Get/Set the state of switch device id as a boolean
+//Get/Set the state of switch device id as a boolean - treats as binary
 void handlerSwitchState(void)
 {
     String message;
@@ -282,7 +285,10 @@ void handlerSwitchState(void)
                 newState = true;
               else
                 newState = false;
-              switchDevice.write( switchID, (newState) ? 1 : 0 );
+              if( reverseRelayLogic )
+                switchDevice.write( switchID, (newState) ? 0 : 0 );
+              else
+                switchDevice.write( switchID, (newState) ? 1 : 0 );
               switchEntry[switchID]->value = (newState)? 1.0F : 0.0F;
               returnCode = 200;              
             break;
@@ -542,6 +548,9 @@ void handlerSwitchValue(void)
           switch( switchEntry[switchID]->type )
           {
             case SWITCH_PWM: 
+                  //analogWrite( switchEntry[i]->pin, output );
+                  root["Value"] = switchEntry[switchID]->value;
+                  break;
             case SWITCH_ANALG_DAC:
                   //e.g. analogue_write( 256, 15);
             //Not supported yet - need to be able to add pin mapping to this & requires
@@ -552,7 +561,7 @@ void handlerSwitchValue(void)
             case SWITCH_RELAY_NO:
             case SWITCH_RELAY_NC:
                   returnCode = 400;
-                  root["ErrorMessage"] = "Invalid analogue operation for binary/boolean switch type";
+                  root["ErrorMessage"] = "Invalid analogue operation for binary/boolean switch type - use getSwitch";
                   root["ErrorNumber"] = invalidOperation ;
                   break;
             default:
@@ -633,7 +642,9 @@ void handlerMinSwitchValue(void)
     {
       switchID = server.arg( argToSearchFor ).toInt();
       if( switchID >= 0 && switchID < numSwitches )
-        root.set("Value", switchEntry[switchID]->min );
+      {  
+        root.set<double>("Value", switchEntry[switchID]->min );
+      }
       else
       {
         root["ErrorMessage"] = "SwitchID value out of range.";
@@ -665,14 +676,14 @@ void handlerMaxSwitchValue(void)
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "MaxSwitchValue", 0, "" );    
+    jsonResponseBuilder( root, clientID, transID, "MaxSwitchValue", Success, "" );    
 
     if ( hasArgIC(argToSearchFor, server, false ) )
     {
       switchID = server.arg(argToSearchFor).toInt();
       if ( switchID >= 0 && switchID < numSwitches )
       {
-        root["value"] = (double) switchEntry[switchID]->max;
+        root.set<double>("Value", switchEntry[switchID]->max );
         returnCode = 200;
       }
       else
@@ -706,14 +717,14 @@ void handlerSwitchStep(void)
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "SwitchStep", 0, "" );    
+    jsonResponseBuilder( root, clientID, transID, "SwitchStep", Success, "" );    
 
     if ( hasArgIC(argToSearchFor, server, false ) )
     {
       switchID = server.arg(argToSearchFor).toInt();
       if( switchID >= 0 && switchID < (uint32_t) numSwitches ) 
       {
-        root["value"] = switchEntry[switchID]->step;
+        root.set<double>("Value", switchEntry[switchID]->step );        
         returnCode = 200;
       }
       else
@@ -749,6 +760,15 @@ void handlerNotFound()
   root["Value"] = 0;
   root.printTo(message);
   server.send(responseCode, "text/json", message);
+}
+
+void handlerRestart()
+{
+  String message;
+  int responseCode = 200;
+  message.concat( "restarting on user request" );
+  server.send(responseCode, "text/plain", message);
+  device.restart();
 }
 
 void handlerNotImplemented()
@@ -908,205 +928,344 @@ String& setupFormBuilder( String& htmlForm, String& errMsg )
 {
   String hostname = WiFi.hostname();
   
-  htmlForm = "<!DocType html><html lang=en ><head></head><meta charset=\"utf-8\">";
+/*
+<!DocType html>
+<html lang=en >
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+<script>function setTypes( a ) {   var searchFor = "types"+a;  var x = document.getElementById(searchFor).value;  if( x.indexOf( "PWM" ) > 0 || x.indexOf( "DAC" ) > 0 )  {      document.getElementById("pin"+a).disabled = false;      document.getElementById("min"+a).disabled = false;      document.getElementById("max"+a).disabled = false;      document.getElementById("step"+a).disabled = false;  }  else  {      document.getElementById("pin"+a).disabled = true;      document.getElementById("min"+a).disabled = true;      document.getElementById("max"+a).disabled = true;      document.getElementById("step"+a).disabled = true;  }}</script>
+</meta>
+<style>
+legend { font: 10pt;}
+h1 { margin-top: 0; }
+form {
+    margin: 0 auto;
+    width: 450px;
+    padding: 1em;
+    border: 1px solid #CCC;
+    border-radius: 1em;
+}
+div+div { margin-top: 1em; }
+label span {
+    display: inline-block;
+    width: 150px;
+    text-align: right;
+}
+input, textarea {
+    font: 1em sans-serif;
+    width: 150px;
+    box-sizing: border-box;
+    border: 1px solid #999;
+}
+input[type=checkbox], input[type=radio], input[type=submit] {
+    width: auto;
+    border: none;
+}
+input:focus, textarea:focus { border-color: #000; }
+textarea {
+    vertical-align: top;
+    height: 5em;
+    resize: vertical;
+}
+fieldset {
+    width: 410px;
+    box-sizing: border-box;
+    border: 1px solid #999;
+}
+button { margin: 20px 0 0 124px; }
+label {  position: relative; }
+label em {
+  position: absolute;
+  right: 5px;
+  top: 20px;
+}
+</style>
+</head>
+*/
+ 
+  htmlForm = "<!DocType html><html lang=en ><head><meta charset=\"utf-8\">";
   htmlForm += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
   htmlForm += "<link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css\">";
   htmlForm += "<script src=\"https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js\"></script>";
   htmlForm += "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js\"></script>";
   htmlForm += "<script src=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js\"></script>";
-  htmlForm += "<body><div class=\"container\">";
   
+  //Used to enable/disable the input fields for binary relays vs digital PWM and DAC outputs. 
+  htmlForm += "<script>function setTypes( a ) { \
+  var searchFor = \"types\"+a;\
+  var x = document.getElementById(searchFor).value;\
+  if( x.indexOf( \"PWM\" ) > 0 || x.indexOf( \"DAC\" ) > 0 )\
+  {\
+      document.getElementById(\"pin\"+a).disabled = false;\
+      document.getElementById(\"min\"+a).disabled = false;\
+      document.getElementById(\"max\"+a).disabled = false;\
+      document.getElementById(\"step\"+a).disabled = false;\
+  }\
+  else\
+  {\
+      document.getElementById(\"pin\"+a).disabled = true;\
+      document.getElementById(\"min\"+a).disabled = true;\
+      document.getElementById(\"max\"+a).disabled = true;\
+      document.getElementById(\"step\"+a).disabled = true;\  
+  }\
+}</script>";
+  htmlForm += "<style>\
+legend { font: 10pt;}\
+h1 { margin-top: 0; }\
+form { margin: 0 auto; width: 450px;padding: 1em;border: 1px solid #CCC;border-radius: 1em;}\
+div+div { margin-top: 1em; }\
+label span{display: inline-block;width: 150px;text-align: right;}\
+input, textarea {font: 1em sans-serif;width: 150px;box-sizing: border-box;border: 1px solid #999;}\
+input[type=checkbox], input[type=radio], input[type=submit]{width: auto;border: none;}\
+input:focus,textarea:focus{border-color:#000;}\
+textarea {vertical-align: top;height: 5em;resize: vertical;}\
+fieldset {width: 410px;box-sizing: border-box;border: 1px solid #999;}\
+button {margin: 20px 0 0 124px;}\
+label {position:relative;}\
+label em { position: absolute;right: 5px;top: 20px;}\
+</style>";
+
+  htmlForm += "</head>";
+  htmlForm += "<body><div class=\"container\">";
   htmlForm += "<div class=\"row\" id=\"topbar\" bgcolor='A02222'>";
-  htmlForm += "<p> This is the setup page for the Skybadger <a href=\"https://www.ascom-standards.org\">ASCOM</a> Switch device 'espRLY01' which uses the <a href=\"https://www.ascom-standards.org/api\">ALPACA</a> v1.0 API</b>";
+  htmlForm += "<p> This is the setup page for the <a href=\"http://www.skybadger.net\">Skybadger</a> <a href=\"https://www.ascom-standards.org\">ASCOM</a> Switch device '";
+  htmlForm += myHostname;
+  htmlForm += "' which uses the <a href=\"https://www.ascom-standards.org/api\">ALPACA</a> v1.0 API</b>";
   htmlForm += "</div>";
 
   if( errMsg != NULL && errMsg.length() > 0 ) 
   {
-    htmlForm += "<div class=\"row\" id=\"errorbar\" bgcolor='A02222'>";
-    htmlForm += "<b>Error Message </b>";
+    htmlForm += "<div class=\"row\" id=\"errorbar\" bgcolor='lightred'>";
+    htmlForm += "<b>Error Message</b>";
     htmlForm += "</div>";
     htmlForm += "<hr>";
   }
  
+/*
+<body>
+<div class="container">
+<div class="row" id="topbar" bgcolor='A02222'><p> This is the setup page for the Skybadger <a href="https://www.ascom-standards.org">ASCOM</a> Switch device 'espASW01' which uses the <a href="https://www.ascom-standards.org/api">ALPACA</a> v1.0 API</b></div>
+
+<!--<div class="row" id="udpDiscoveryPort" bgcolor='lightblue'>-->
+<p> This device supports the <a href="placeholder">ALPACA UDP discovery API</a> on port: 32227 </p>
+<p> It is not yet configurable.</p>
+<!-- </div> -->
+*/
+
+  //UDP Discovery port 
+  htmlForm += "<p> This device supports the <a href=\"placeholder\">ALPACA UDP discovery API</a> on port: ";
+  htmlForm += udpPort;
+  htmlForm += "</p> <p> It is not yet configurable.</p>";
+
+  //Device instance number
+  
+//<div class="row">
+//<h2> Enter new hostname for device</h2><br>
+//<p>Changing the hostname will cause the device to reboot and may change the IP address!</p>
+//</div>
+//<div class="row float-left" id="deviceAttrib" bgcolor='blue'>
+//<form method="POST" id="hostname" action="http://espASW01/sethostname">
+//<label for="hostname" > Hostname </label>
+//<input type="text" name="hostname" maxlength="25" value="espASW01"/>
+//<input type="submit" value="Update" />
+//</form>
+//</div>
+
   //Device settings hostname and number of switches on this device
-  htmlForm += "<div class=\"row\" id=\"deviceAttrib\" bgcolor='blue'>\n";
+  htmlForm += "<div class=\"row\">";
   htmlForm += "<h2> Enter new hostname for device</h2><br/>";
-  htmlForm += "<p>Changing the hostname will cause the device to reboot and may change the IP address!</p>\n";
-  htmlForm += "<form action=\"http://";
+  htmlForm += "<p>Changing the hostname will cause the device to reboot and may change the IP address!</p>";
+  htmlForm += "</div><div class=\"row float-left\" id=\"deviceAttrib\" bgcolor='blue'>\n";
+  htmlForm += "<form method=\"POST\" id=\"hostname\" action=\"http://";
   htmlForm.concat( myHostname );
-  htmlForm += "/setup/\" method=\"POST\" id=\"hostname\" >\n";
-  htmlForm += "<input type=\"text\" name=\"hostname\" value=\"";
+  htmlForm += "/sethostname\">";
+  htmlForm += "<input type=\"text\" name=\"hostname\" maxlength=\"25\" value=\"";
   htmlForm.concat( myHostname );
-  htmlForm += "\">\n";
+  htmlForm += "\"/>";
+  htmlForm += "<label for=\"hostname\" > Hostname </label>";
+  htmlForm += "<input type=\"submit\" value=\"Update\" />";
+  htmlForm += "</form></div>";
 
-  htmlForm += "<h2>Update switches</h2><br/>";
-  htmlForm += "<p>Upscaling will copy the existing setup to the new setup but you will need to edit the added switches. </p>";
-  htmlForm += "<p>Downscaling will delete the configuration for the switches dropped</p><br>";
-  htmlForm += "<p>New switch count: <input type=\"number\" name=\"numSwitches\" min=\"1\" max=\"16\" value=\"8\"></p>";
-  htmlForm += "<input type=\"submit\" value=\"Submit\"> </form> </div>";
+//<div class="row float-left">
+//<h2>Configure switches</h2><br>
+//<p>Editing this to add switch components ('upscaling') will copy the existing setup to the new setup but you will need to edit the added switches. </p><p>Editing this to reduce the number of switch components ('downscaling') will delete the configuration for the switches dropped but retain those lower number switch configurations for further editing</p><br>
+//</div>
+//<div class="row float-left">
+//<form action="http://espASW01/setswitchcount" method="POST" id="switchcount" ><label for="numSwitches" >Number of switch components</label>
+//<input type="number" name="numSwitches" min="1" max="16" value="8">
+//<input type="submit" value="Update"> </form> </div>
 
-  htmlForm += "<div class=\"col-sm-2\"> ";
-  htmlForm += "<form action=\"http://";
-  htmlForm += myHostname;
-  htmlForm += "/api/v1/switch/setup/switch\">";
+  htmlForm += "<div class=\"row float-left\"> ";
+  htmlForm += "<h2>Configure switches</h2><br/>";
+  htmlForm += "<p>Editing this to add switch components ('upscaling') will copy the existing setup to the new setup but you will need to edit the added switches. </p>";
+  htmlForm += "<p>Editing this to reduce the number of switch components ('downscaling') will delete the configuration for the switches dropped but retain those lower number switch configurations for further editing</p><br></div>";
+
+  htmlForm += "<div class=\"row flat-left\"><form action=\"http://";
+  htmlForm.concat( myHostname );
+  htmlForm += "/setswitchcount\" method=\"POST\" id=\"switchcount\" >";
+  htmlForm += "<label for=\"numSwitches\" >Number of switch components</label>";
+  htmlForm += "<input type=\"number\" name=\"numSwitches\" min=\"1\" max=\"16\" value=\"8\">";
+  htmlForm += "<input type=\"submit\" value=\"Update\"> </form> </div>";
+
+//<div class="row float-left"> 
+//<h2>Switch configuration </h2><br>
+//<p>To configure the switch types and limits, select the switch you need below.</p>
+//</div>
+
+  htmlForm += "<div class=\"row float-left\"> ";
   htmlForm += "<h2>Switch configuration </h2>";
-  htmlForm += "<br><p>In order to configure the switches, select the switch you need below.</p>";
+  htmlForm += "<br><p>To configure the switche types and limits, select the switch you need below.</p></div>";
   
-  htmlForm += "";
-  htmlForm += "<input type=\"radio\" name=\"switchNum\" value=\"0\" checked > 0 <br>";
-//      <input type="radio" name="switchNum" value="1" > 1 <br>
-  htmlForm += "<input type=\"submit\" value=\"Submit\">";
-  htmlForm += "</form>";
-  htmlForm += "</div >";
+//<div class="row float-left"> 
+//<form action="/api/v1/switch/0/setupswitch" Method="PUT">
+//<input type="hidden" value="0" name="switchID" />
+//<legend>Settings Switch 0</legend>
+//<label for="fname0"><span>Switch Name</span></label><input type="text" id="fname0" name="fname0" value="Switch_0" maxlength="25"><br>
+//<label for="lname0"><span>Description</span></label><input type="text" id="lname0" name="lname0" value="Default description" maxlength="25"><br>
+//<label for="types0"><span>Type</span></label><select id="types0" name="Relay_types0" onChange="setTypes( 0 )">
+//<option value="SWITCH_NC">Relay (NC)</option>
+//<option value="SWITCH_NO">Relay (NO)</option>
+//<option value="SWITCH_PWM">PWM</option>
+//<option value="SWITCH_DAC">DAC</option></select> <br>
+//<label for="pin0"><span>Hardware pin</span></label><input disabled type="number" id="pin0" name="pin0" value="0" min="0" max="16"><br>
+//<label for="min0"><span>Min value</span></label><input type="number" id="min0" name="min0" value="0.00" min="0.0" max="1.0" disabled><br>
+//<label for="max0"><span>Max value</span></label><input type="number" id="max0" name="max0" value="1.00" min="0.0" max="1.0" disabled><br>
+//<label for="step0"><span>Steps in range</span></label><input type="number" id="step0" name="step0" value="1.00" min="0" max="1024" disabled ><br>
+//<label for="writeable0"><span>Writeable</span></label><input type="radio" id="writeable0" name="writeable0" value="0" >
+//<br>
+//<input type="submit" value="Update" align="center">
 
-/*   
-  <!DocType html>
-<html lang=en >
-<head></head>
-<meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
-  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
-  
-  <body>
-  <div class="container" >
-     <div class="row" id="topbar" bgcolor='A02222'>
-     <p> This is the setup page for the Skybadger <a href="https://www.ascom-standards.org">ASCOM</a> Switch device 'espRLY01' which uses the <a href="https://www.ascom-standards.org/api">ALPACA</a> v1.0 API</b>
-     </div>
-
-     <div class="row" id="errorbar" bgcolor='A02222'>
-     <b>    Error Message </b>
-     </div>
-     <div class="row" id="deviceName" bgcolor='blue'>
-     <div class="col-sm-2">
-     <form method="POST" action="http://espRLY01/setup" >
-     <h2>Change hostname</h2>
-     <p>Changing the hostname for this device will cause the device to reboot and may change the IP address!</p>
-     <p>Enter new Hostname: <input type="text" name="hostname" value="espRLY01" > </p>
-
-     <h2> Update switches</h2>
-     <p>Upscaling will copy the existing setup to the new setup but you will need to edit the added switches. </p>
-     <p>Downscaling will delete the configuration for the switches dropped</p><br>
-     <p>New switch count: <input type="number" name="numSwitches" min="1" max="16" value="8"></p>
-     <input type="submit" value="Submit">
-     </form>
-     </div>
-    
-     <div class="col-sm-2"> 
-     <form action="http://espRLY01/setupSwitch">
-     <h2>Switch configuration </h2>
-     <br>
-     <p>In order to configure the switches, select the switch you need below.</p>
-
-      <input type="radio" name="switchNum" value="0" checked> 0 <br>
-      <input type="radio" name="switchNum" value="1" > 1 <br>
-      <input type="radio" name="switchNum" value="2" > 2 <br>
-      <input type="radio" name="switchNum" value="3" > 3 <br>
-      <input type="radio" name="switchNum" value="4" > 4 <br>
-      <input type="radio" name="switchNum" value="5" > 5 <br>
-      <input type="submit" value="Submit">
-      </div >   
-      </form>
-      </div>
-</body>
-</html>
-  
-  htmlForm += "<input type=\"number\" name=\"unitCount\" value=\"";
-  htmlForm.concat( numSwitches );
-  htmlForm += "\">\n";
-  htmlForm += "<input type=\"submit\" value=\"submit\">\n</form>\n";
-  htmlForm +="</div>";
-  
-  //Parameters of individual switches on this device
-  htmlForm +="<div id="switchAttrib" bgcolor='green'><b>\n";
-  htmlForm += "<h1> Setup what switches the device controls</h1>\n";
-  htmlForm += "<p> Setting a switch incorrectly may damage whatever is connected to it. </p>\n";
-  htmlForm += "<form action=\"http://";
-  htmlForm.concat( myHostname );
-  htmlForm += "/api/v1/switch/setup";
-  htmlForm += switchID;
-  htmlForm += "/switchAttrib\" method=\"PUT\" id=\"switchAttributes\" >\n";
-
-  htmlForm += "<table>";
-  for ( int i = 0 i< numSwitches; i++ )
+  //List the switches
+  for ( int i=0; i< numSwitches; i++ )
   {
-    htmlForm += "<tr>";
-    // unit number
-    htmlForm += "<td>";
-    htmlForm += i;
-    htmlForm += "</td><td>";
-    //unit type
-    htmlForm += "<select name=\"unitType\" size=\"3\">";
-    for ( int j= 0; j< sizeof( switchTypes ); j++ )
-    { //  <option value=switchTypes[1]>switchTypes[1]</option>
-      htmlForm += "<option value=";
-      htmlForm += switchTypes[j]";
-      htmlForm += ">";
-      htmlForm += switchTypes[j];
-      htmlForm += "</option>";
-    }
-    htmlForm += "</select></td>";
-    //unit description
-    htmlForm += "<td>";
-    
-    htmlForm += "</td>";
-    //unit min
-    //unit max
-    //unit value
-    //unit increment
-    //unit writeable
-    htmlForm += "<td>";
-    
-    htmlForm += "</td>";
-    
-    htmlForm += "</tr>";
-  }
+  htmlForm += "<div class=\"row float-left\">";
+  htmlForm += "<form action=\"/api/v1/switch/0/setupswitch\" Method=\"PUT\">";
+  htmlForm += "<input type=\"hidden\" value=\"";
+  htmlForm += i;
+  htmlForm += "\" name=\"switchID\" />";
 
-  //Update device::switchID descriptions
-  htmlForm += "<h1> Enter new descriptive name for filter wheel</h1>\n";
-  htmlForm += "<form action=\"/switch/0/Wheelname\" method=\"PUT\" id=\"wheelname\" >\n";
-  htmlForm += "<input type=\"text\" name=\"wheelname\" value=\"";
-  htmlForm.concat( wheelName );
-  htmlForm += "\">\n";
-  htmlForm += "<input type=\"submit\" value=\"submit\">\n</form>\n";
-    
-  //Switches by position
-  htmlForm += "<h1> Enter switch settings for each switch </h1>\n";
-  htmlForm += "<form action=\"http://";
-  htmlForm.concat(hostname);
-  htmlForm += "API/v1/switch/0/FilterNames\" method=\"PUT\" id=\"filternames\" >\n";
-  htmlForm += "<ol>\n";
-  for ( i=0; i< filtersPerWheel; i++ )
-  {
-    htmlForm += "<li>Filter name <input type=\"text\" name=\"filtername_";
-    htmlForm.concat( i);
-    htmlForm += "\" value=\"" + String(filterNames[i]) + "\"></li>\n";
-  }
-  htmlForm += "</ol>\n";
-  htmlForm += "<input type=\"submit\" value=\"submit\">\n</form>\n";
+  htmlForm += "<legend>Settings Switch ";
+  htmlForm += i;
+  htmlForm += "</legend>";
+
+  //Name
+  htmlForm += "<label for=\"fname";
+  htmlForm += i;
+  htmlForm += "\"><span>Switch Name<span></label>";
+  htmlForm += "<input type=\"text\" id=\"fname";
+  htmlForm += i;
+  htmlForm += "\" name=\"fname";
+  htmlForm += i;
+  htmlForm += "\" value=\"";
+  htmlForm += switchEntry[i]->switchName;
+  htmlForm += "\" maxlength=\"25\"><br>";
+     
+  //Description
+  htmlForm += "<label for=\"lname";
+  htmlForm += i;
+  htmlForm += "\"><span>Description<span></label>";
+  htmlForm += "<input type=\"text\" id=\"lname";
+  htmlForm += i;
+  htmlForm += "\" name=\"lname";
+  htmlForm += i;
+  htmlForm += "\" value=\"";
+  htmlForm += switchEntry[i]->description;
+  htmlForm += "\" maxlength=\"25\"><br>";
   
-  //Filter focus offsets by position
-  htmlForm += "<h1> Enter focuser offset for each filter </h1>\n";
-  htmlForm += "<form action=\"http://";
-  htmlForm.concat(hostname);
-  htmlForm += "/FilterWheel/0/FocusOffsets\" method=\"PUT\" id=\"offsets\">\n";
-  htmlForm += "<ol>\n";
-  for ( i=0; i< filtersPerWheel; i++ )
-  {
-    htmlForm += "<li> Filter <input type=\"text\" name=\"focusoffset_";
-    htmlForm.concat(i);
-    htmlForm += "\" value=\"";
-    htmlForm.concat( focusOffsets[i] );
-    htmlForm += "\"></li>\n";
-  }
-  htmlForm += "</ol>\n";
-  htmlForm += "<input type=\"submit\" value=\"submit\">\n</form>\n";
+  //Type - Hardware implementation detail expossed for configuration
+  htmlForm += "<label for=\"types";
+  htmlForm += i;
+  htmlForm += "\"><span>Switch type</span></label>";
+  htmlForm += "<select id=\"types";
+  htmlForm += i;
+  htmlForm += "\" name=\"Relay_types";
+  htmlForm += i;
+  htmlForm += "\" onChange=\"setTypes( ";
+  htmlForm += i;
+  htmlForm += " )\">";
+  htmlForm += "<option value=\"SWITCH_NC\">Relay (NC)</option>";
+  htmlForm += "<option value=\"SWITCH_NO\">Relay (NO)</option>";
+  htmlForm += "<option value=\"SWITCH_PWM\">PWM</option>";
+  htmlForm += "<option value=\"SWITCH_DAC\">DAC</option>";
+  htmlForm += "</select> <br>";
 
-  */
-  htmlForm += "</body>\n</html>\n";
+  //Pin - Hardware implementation detail exposed for configuration
+  htmlForm += "<label for=\"pin";
+  htmlForm += i;
+  htmlForm += "\"><span>Hardware pin</span></label>";
+  htmlForm += "<input disabled type=\"number\" id=\"pin";
+  htmlForm += i;
+  htmlForm += "\" name=\"pin";
+  htmlForm += i;
+  htmlForm += "\" value=\"";
+  htmlForm += switchEntry[i]->pin;
+  htmlForm += "\" min=\"0\" max=\"16\"><br>";
+  
+  //Min value for switch 
+  htmlForm += "<label for=\"min";
+  htmlForm += i;
+  htmlForm += "\"><span>Switch min value</span></label>";
+  htmlForm += "<input type=\"number\" id=\"min";
+  htmlForm += i;
+  htmlForm += "\" name=\"min";
+  htmlForm += i;
+  htmlForm += "\" value=\"";
+  htmlForm += switchEntry[i]->min;
+  htmlForm += "\" min=\"0.0\" max=\"1.0\" disabled><br>";
+  
+  //Max value for switch
+  htmlForm += "<label for=\"max";
+  htmlForm += i;
+  htmlForm += "\"><span>Max value</span></label>";
+  htmlForm += "<input type=\"number\" id=\"max";
+  htmlForm += i;
+  htmlForm += "\" name=\"max";
+  htmlForm += i;
+  htmlForm += "\" value=\"";
+  htmlForm += switchEntry[i]->max;
+  htmlForm += "\" min=\"0.0\" max=\"1.0\" disabled><br>";
+  
+  //Step - number of steps in range for switch
+  htmlForm += "<label for=\"step";
+  htmlForm += i;
+  htmlForm += "\"><span>Steps in range</span></label>";
+  htmlForm += "<input type=\"number\" id=\"step";
+  htmlForm += i;
+  htmlForm += "\" name=\"step";
+  htmlForm += i;
+  htmlForm += "\" value=\"";
+  htmlForm += switchEntry[i]->step;
+  htmlForm += "\" min=\"0\" max=\"1024\" disabled ><br>";
+  
+  //Value - startup value - careful ! Might remove this and require it to be set programmatically.
+  htmlForm += "<label for=\"writeable";
+  htmlForm += i;
+  htmlForm += "\"><span>Writeable</span></label>";
+  htmlForm += " &nbsp; <input type=\"radio\" id=\"writeable";
+  htmlForm += i;
+  htmlForm += "\" name=\"writeable";
+  htmlForm += i;
+  htmlForm += "\" value=\"";
+  htmlForm += switchEntry[i]->writeable;
+  htmlForm += "\" ><br>";
+    
+  htmlForm += "<input type=\"submit\" value=\"Update\">";
+  htmlForm += "</fieldset> "; 
+  htmlForm += "</form></div>";
+  } //endfor
+  
+/*
+</form>
+</div>
+</body></html>
+*/
 
+  htmlForm += "</div></body></html>";
   return htmlForm;
 }
 #endif

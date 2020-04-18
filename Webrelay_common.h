@@ -8,9 +8,21 @@ ASCOM project common variables
 #define DEBUG
 #endif 
 
+#define _REVERSE_RELAY_LOGIC_
+#if defined _REVERSE_RELAY_LOGIC_
+const bool reverseRelayLogic = true;
+#else
+const bool reverseRelayLogic = false;
+#endif
+
+
+
 const int MAX_NAME_LENGTH = 25;
 #define DEFAULT_NUM_SWITCHES 8;
 const int defaultNumSwitches = DEFAULT_NUM_SWITCHES;
+#define ASCOM_DEVICE_TYPE "switch" //used in server handler uris
+const int defaultInstanceNumber = 0;
+int instanceNumber = 0;
 
 //ASCOM driver common variables 
 unsigned int transactionId;

@@ -1,0 +1,114 @@
+
+<!DocType html>
+<html lang=en >
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+<script>function setTypes( a ) {   var searchFor = "types"+a;  var x = document.getElementById(searchFor).value;  if( x.indexOf( "PWM" ) > 0 || x.indexOf( "DAC" ) > 0 )  {      document.getElementById("pin"+a).disabled = false;      document.getElementById("min"+a).disabled = false;      document.getElementById("max"+a).disabled = false;      document.getElementById("step"+a).disabled = false;  }  else  {      document.getElementById("pin"+a).disabled = true;      document.getElementById("min"+a).disabled = true;      document.getElementById("max"+a).disabled = true;      document.getElementById("step"+a).disabled = true;  }}</script>
+</meta>
+<style>
+legend { font: 10pt;}
+h1 { margin-top: 0; }
+form {
+    margin: 0 auto;
+    width: 450px;
+    padding: 1em;
+    border: 1px solid #CCC;
+    border-radius: 1em;
+}
+div+div { margin-top: 1em; }
+label span {
+    display: inline-block;
+    width: 150px;
+    text-align: right;
+}
+input, textarea {
+    font: 1em sans-serif;
+    width: 150px;
+    box-sizing: border-box;
+    border: 1px solid #999;
+}
+input[type=checkbox], input[type=radio], input[type=submit] {
+    width: auto;
+    border: none;
+}
+input:focus, textarea:focus { border-color: #000; }
+textarea {
+    vertical-align: top;
+    height: 5em;
+    resize: vertical;
+}
+fieldset {
+    width: 410px;
+    box-sizing: border-box;
+    border: 1px solid #999;
+}
+button { margin: 20px 0 0 124px; }
+label {  position: relative; }
+label em {
+  position: absolute;
+  right: 5px;
+  top: 20px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="row" id="topbar" bgcolor='A02222'><p> This is the setup page for the Skybadger <a href="https://www.ascom-standards.org">ASCOM</a> Switch device 'espASW01' which uses the <a href="https://www.ascom-standards.org/api">ALPACA</a> v1.0 API</b></div>
+
+<!--<div class="row" id="udpDiscoveryPort" bgcolor='lightblue'>-->
+<p> This device supports the <a href="placeholder">ALPACA UDP discovery API</a> on port: 32227 </p>
+<p> It is not yet configurable.</p>
+<!-- </div> -->
+
+<div class="row">
+<h2> Enter new hostname for device</h2><br>
+<p>Changing the hostname will cause the device to reboot and may change the IP address!</p>
+</div>
+<div class="row float-left" id="deviceAttrib" bgcolor='blue'>
+<form method="POST" id="hostname" action="http://espASW01/sethostname">
+<label for="hostname" > Hostname </label>
+<input type="text" name="hostname" maxlength="25" value="espASW01"/>
+<input type="submit" value="Update" />
+</form>
+</div>
+
+<div class="row float-left">
+<h2>Configure switches</h2><br>
+<p>Editing this to add switch components ('upscaling') will copy the existing setup to the new setup but you will need to edit the added switches. </p><p>Editing this to reduce the number of switch components ('downscaling') will delete the configuration for the switches dropped but retain those lower number switch configurations for further editing</p><br>
+</div>
+<div class="row float-left">
+<form action="http://espASW01/setswitchcount" method="POST" id="switchcount" ><label for="numSwitches" >Number of switch components</label>
+<input type="number" name="numSwitches" min="1" max="16" value="8">
+<input type="submit" value="Update"> </form> </div>
+
+<div class="row float-left"> 
+<h2>Switch configuration </h2><br>
+<p>To configure the switch types and limits, select the switch you need below.</p>
+</div>
+
+<div class="row float-left"> 
+<form action="/api/v1/switch/0/setupswitch" Method="PUT">
+<input type="hidden" value="0" name="switchID" />
+<legend>Settings Switch 0</legend>
+<label for="fname0"><span>Switch Name</span></label><input type="text" id="fname0" name="fname0" value="Switch_0" maxlength="25"><br>
+<label for="lname0"><span>Description</span></label><input type="text" id="lname0" name="lname0" value="Default description" maxlength="25"><br>
+<label for="types0"><span>Type</span></label><select id="types0" name="Relay_types0" onChange="setTypes( 0 )">
+<option value="SWITCH_NC">Relay (NC)</option>
+<option value="SWITCH_NO">Relay (NO)</option>
+<option value="SWITCH_PWM">PWM</option>
+<option value="SWITCH_DAC">DAC</option></select> <br>
+<label for="pin0"><span>Hardware pin</span></label><input disabled type="number" id="pin0" name="pin0" value="0" min="0" max="16"><br>
+<label for="min0"><span>Min value</span></label><input type="number" id="min0" name="min0" value="0.00" min="0.0" max="1.0" disabled><br>
+<label for="max0"><span>Max value</span></label><input type="number" id="max0" name="max0" value="1.00" min="0.0" max="1.0" disabled><br>
+<label for="step0"><span>Steps in range</span></label><input type="number" id="step0" name="step0" value="1.00" min="0" max="1024" disabled ><br>
+<label for="writeable0"><span>Writeable</span></label><input type="radio" id="writeable0" name="writeable0" value="0" >
+<br>
+<input type="submit" value="Update" align="center">
+</form>
+</div>
+</body></html>
