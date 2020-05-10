@@ -18,7 +18,7 @@ const bool reverseRelayLogic = false;
 
 
 const int MAX_NAME_LENGTH = 25;
-#define DEFAULT_NUM_SWITCHES 8;
+#define DEFAULT_NUM_SWITCHES 2;
 const int defaultNumSwitches = DEFAULT_NUM_SWITCHES;
 #define ASCOM_DEVICE_TYPE "switch" //used in server handler uris
 const int defaultInstanceNumber = 0;
@@ -41,16 +41,14 @@ const String DriverType = "Switch";
 #define TZ_SEC          ((TZ)*3600)
 #define DST_SEC         ((DST_MN)*60)
 
-const String switchTypes[] = {"PWM","Relay_NO","DAC","Relay_NC"};
-enum SwitchType { SWITCH_PWM, SWITCH_RELAY_NO, SWITCH_RELAY_NC, SWITCH_ANALG_DAC };
+const String switchTypes[5] = {"Relay_NO", "Relay_NC", "PWM", "DAC","Not Selected"};
+enum SwitchType { SWITCH_RELAY_NO, SWITCH_RELAY_NC, SWITCH_PWM, SWITCH_ANALG_DAC, SWITCH_NOT_SELECTED };
 
 /*
  Typical values for PWM And ADC are 0 - 1024/1024, PWM in terms of fraction of the wave is high 
  and DAC in terms of the output voltage as a fraction of Vcc. 
  
  */
-//define the max resolution available to control a DAC or PWM
-#define MAX_DIGITAL_STEPS 1024 
 
 typedef struct 
 {
@@ -64,6 +62,32 @@ typedef struct
   float step = 1.0;
   float value = 0.0F;
 } SwitchEntry;
+
+//Define the maximum number of switches supported - limited by memory really 
+const int MAXSWITCH = 16;
+//define the max resolution available to control a DAC or PWM
+const int MAX_DIGITAL_STEPS = 1024;
+//Value limits
+const float MAXDIGITALVAL = 1024.0F; //ie 12 bit resolution supported.  Vcc assumed max range.
+const float MAXBINARYVAL = 1.0F;      // true or false ? open or closed settings on relay. 
+const float MINVAL = 0.0F;
+
+//Pin limits
+const int NULLPIN = 0; 
+#if defined ESP8266-01
+//GPIO 0 is Serial tx, GPIO 2 I2C SDA, GPIO 1 SCL, so it depends on whether you use i2c or not.
+//Cos that just leaves Rx.  
+const int pinMap[] = {3}; 
+#elif defined ESP8266-12
+//Most pins are used for flash, so we assume those for SSI are available.
+//Typically use 4 and 5 for I2C, leaves 
+const int pinMap[] = { 2, 14, 12, 13, 15};
+#else
+const int pinMap[] = {NULLPIN};
+#endif 
+
+const int MINPIN = 1; //device specific
+const int MAXPIN = 16; //device specific
 
 //UDP discovery service responder struct.
 #define ALPACA_DISCOVERY_PORT 32227

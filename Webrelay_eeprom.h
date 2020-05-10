@@ -186,6 +186,7 @@ void setupFromEeprom( void )
     saveToEeprom();
     DEBUGSL1( "Failed to find init magic byte - wrote defaults & restarted.");
     device.restart();
+    return;
   }    
     
   //Num Switches 

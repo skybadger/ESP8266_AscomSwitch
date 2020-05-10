@@ -3,6 +3,9 @@
  Typically implemented dusing wireless to talk to the device, and the device uses a PCF8574 I2C serial expander to control an 8 or 16 bit wide data bus
  You can get simple relay boards off the web for ten GBP or so and create a capble to connect the two together.
  Supports web interface on port 80 returning json string
+
+Notes: 
+ Step field is interpreted as number of digital steps in full range from min to max. ie a 10-bit DAC will allow a value of 1024 
  
  To do:
   Complete Setup page - in progress
@@ -156,7 +159,7 @@ void setup()
   
   //Setup default data structures
   DEBUGSL1("Setup EEprom variables"); 
-  EEPROM.begin(700);
+  EEPROM.begin( 4+ (MAXSWITCH*50) + (MAXSWITCH*sizeof(SwitchEntry)) + (2*MAX_NAME_LENGTH) + (2* sizeof(int) ) );
   //setDefaults();
   setupFromEeprom();
   DEBUGSL1("Setup eeprom variables complete."); 
@@ -200,7 +203,7 @@ void setup()
   else
   {
     switchPresent = true;
-    //Toggle a LED to indicae we're working
+    //Toggle a relay to indicate we're working
     switchDevice.write(0, 1);delay(1000);
     switchDevice.write(0, 0);delay(1000);
     switchDevice.write(0, 1);
@@ -266,12 +269,12 @@ void setup()
 //Additional non-ASCOM custom setup calls
   server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerSwitchType );
   server.on("/api/v1/switch/0/setswitchtype",       HTTP_PUT, handlerSwitchType );
-  server.on("/setup",                               HTTP_ANY, handlerSetup );
+  server.on("/setup",                               HTTP_GET, handlerSetup );
   server.on("/status",                              HTTP_GET, handlerStatus);
-  server.on("/restart",                             HTTP_GET, handlerRestart);
-  server.on("/api/v1/switch/0/status",              HTTP_ANY, handlerStatus );
-  server.on("/api/v1/switch/0/setup",               HTTP_ANY, handlerSetup );
-  server.on("/api/v1/switch/0/setupSwitches",       HTTP_ANY, handlerSetupSwitches );
+  server.on("/restart",                             HTTP_ANY, handlerRestart);
+  server.on("/setup/numswitches" ,                  HTTP_ANY, handlerSetupNumSwitches );
+  server.on("/setup/hostname" ,                     HTTP_ANY, handlerSetupHostname );
+  server.on("/setup/switches",                      HTTP_ANY, handlerSetupSwitches );
   updater.setup( &server );
   server.begin();
   DEBUGSL1("Web server handlers setup & started");
@@ -347,7 +350,6 @@ void loop()
   
   //Handle web requests
   server.handleClient();
- 
 }
 
 /* MQTT callback for subscription and topic.
