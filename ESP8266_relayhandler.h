@@ -815,6 +815,11 @@ void handlerStatus(void)
     
     root["time"] = getTimeAsString( timeString );
     root["host"] = myHostname;
+    if( connected )
+    {
+      root["connected"] = (connected)?"true":"false";
+      root["clientId"] = connectedClient;
+    }
     
     for( i = 0; i < numSwitches; i++ )
     {
