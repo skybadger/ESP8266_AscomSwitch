@@ -40,13 +40,16 @@ Sub Welcome()
 	WScript.Echo "Push OK to begin Startup" 
 End Sub 
 '******************************************************************************** 
-Sub OpenPrgs() 
+function OpenPrgs( progname ) 
 	Set oWmi = GetObject("winmgmts:" & " {impersonationLevel=impersonate }!    " & "." & "  root  cimv2") 
  
 	TimeEnd = Timer + 2 
 	Do While Timer < TimeEnd 
 	Loop 
-	Set colProcessList = oWmi.ExecQuery("Select * from Win32_Process Where Name = 'RoboFocus.exe'") 
+	query = "Select * from Win32_Process Where Name = '"
+   query = query + progname
+   query = query + "'"
+   Set colProcessList = oWmi.ExecQuery(query) 
 	if colProcessList.count = 0 then 
 		Set WshShell = CreateObject("WScript.Shell") 
 		set oExec = WshShell.Exec("C:  Program Files  Common Files  ASCOM  Focuser  RoboFocus.exe") 
@@ -55,7 +58,7 @@ Sub OpenPrgs()
 		Loop 
 	end if 
  
-End Sub 
+End func 
 '******************************************************************************** 
 Sub createObjects() 
 	Set ar = WScript.CreateObject("ASCOM.Remote1.Switch") 

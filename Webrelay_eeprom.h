@@ -28,6 +28,7 @@ void setDefaults( void )
      free ( myHostname );
   myHostname = (char* )calloc( sizeof (char), MAX_NAME_LENGTH );
   strcpy( myHostname, defaultHostname);
+  WiFi.hostname( myHostname );
 
   //MQTT thisID copied from hostname
   if ( thisID != nullptr ) 

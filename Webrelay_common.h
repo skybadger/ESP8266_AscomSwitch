@@ -15,8 +15,6 @@ const bool reverseRelayLogic = true;
 const bool reverseRelayLogic = false;
 #endif
 
-
-
 const int MAX_NAME_LENGTH = 25;
 #define DEFAULT_NUM_SWITCHES 2;
 const int defaultNumSwitches = DEFAULT_NUM_SWITCHES;

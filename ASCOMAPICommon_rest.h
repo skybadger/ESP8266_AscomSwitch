@@ -149,7 +149,7 @@ void handleConnected(void)
 
       //don't like the logic here - if its already connected for this client we should refuse a connect. 
       if( hasArgIC( argToSearchFor, server, false ) && 
-          server.arg(argToSearchFor) && 
+          server.arg(argToSearchFor).length() > 0  && 
           server.arg(argToSearchFor).equalsIgnoreCase("true" ) )
       { //setting to true 
         if ( connected )//already true
@@ -190,7 +190,7 @@ void handleConnected(void)
         {
           DEBUGSL1( "Entered handleConnected::PUT::False::set unconnected - OK" );
           connected = false; //OK   
-          connectedClient = -1;       
+          connectedClient = 0;       
           jsonResponseBuilder( root, clientID, transID, "Connected", Success , "Disconnected OK" );        
           root["Value"]= connected;    
           root.printTo(message);

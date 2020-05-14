@@ -125,7 +125,7 @@ void setup_wifi()
   int zz = 0;
   WiFi.hostname( myHostname );
   WiFi.mode(WIFI_STA); 
-  WiFi.begin(ssid1, password1);
+  WiFi.begin( ssid1, password1 );
   Serial.print("Searching for WiFi..");
   while (WiFi.status() != WL_CONNECTED) 
   {
@@ -136,13 +136,15 @@ void setup_wifi()
   }
 
   Serial.println("WiFi connected");
+  Serial.printf("SSID: %s, Signal strength %i dBm \n\r", WiFi.SSID().c_str(), WiFi.RSSI() );
   Serial.printf("Hostname: %s\n\r",      WiFi.hostname().c_str() );
   Serial.printf("IP address: %s\n\r",    WiFi.localIP().toString().c_str() );
   Serial.printf("DNS address 0: %s\n\r", WiFi.dnsIP(0).toString().c_str() );
   Serial.printf("DNS address 1: %s\n\r", WiFi.dnsIP(1).toString().c_str() );
 
   //Setup sleep parameters
-  wifi_set_sleep_type(LIGHT_SLEEP_T);
+  //wifi_set_sleep_type(LIGHT_SLEEP_T);
+  wifi_set_sleep_type(NONE_SLEEP_T);
 
   delay(5000);
   Serial.println( "WiFi connected" );
@@ -289,7 +291,7 @@ void setup()
   
   //fire timer every 250 msec
   //Set the timer function first
-  ets_timer_arm_new( &timer, 250, 1/*repeat*/, 1);
+  ets_timer_arm_new( &timer, 1000, 1/*repeat*/, 1);
   //ets_timer_arm_new( &timeoutTimer, 2500, 0/*one-shot*/, 1);
   
   Serial.println( "Setup complete" );
@@ -384,6 +386,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   JsonObject& root = jsonBuffer.createObject();
   root["Time"] = timestamp;
   root["Message"] = "Listening";
+  
   root.printTo( output);
   
   //Put a notice out regarding device health

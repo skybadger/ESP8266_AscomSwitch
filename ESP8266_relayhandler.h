@@ -292,7 +292,7 @@ void handlerSwitchState(void)
               else
                 newState = false;
               if( reverseRelayLogic )
-                switchDevice.write( switchID, (newState) ? 0 : 0 );
+                switchDevice.write( switchID, (newState) ? 0 : 1 );
               else
                 switchDevice.write( switchID, (newState) ? 1 : 0 );
               switchEntry[switchID]->value = (newState)? 1.0F : 0.0F;
@@ -518,7 +518,7 @@ void handlerSwitchType(void)
 
 //GET ​/switch​/{device_number}​/getswitchvalue
 //PUT ​/switch​/{device_number}​/setswitchvalue
-//Get/Set the value of the specified switch device as a double
+//Get/Set the value of the specified switch device as a double - ie not a binary setting
 void handlerSwitchValue(void)
 {
     String message;
@@ -580,15 +580,19 @@ void handlerSwitchValue(void)
           switch( switchEntry[switchID]->type ) 
           {
             case SWITCH_PWM: 
-            //Not supported yet - need to be able to add pin mapping to this & requires
-            //More pins than a simple ESP8266 & PCF8574A combo
                   if ( value >= switchEntry[switchID]->min && 
                        value <= switchEntry[switchID]->max )
                   {
                     switchEntry[switchID]->value = value;
-                    //e.g. analogue_write( switchEntry[switchID]->pin, switchEntry[switchID]->pin );
+                    analogWrite( switchEntry[switchID]->pin, switchEntry[switchID]->value );
+                    returnCode = 200;
                   }
-                  returnCode = 200;
+                  else
+                  {
+                    root["ErrorMessage"] = "Digital write out of range for switch";
+                    root["ErrorNumber"] = invalidOperation ;
+                    returnCode = 200;
+                  }                  
                   break;
                   
             case SWITCH_RELAY_NO:
@@ -603,6 +607,8 @@ void handlerSwitchValue(void)
                   {
                     switchEntry[switchID]->value = value;
                     //e.g. analogue_write( switchEntry[switchID]->pin, switchEntry[switchID]->pin );
+                    root["ErrorMessage"] = "DAC Not implemented yet - Invalid digital operation for switch";
+                    root["ErrorNumber"] = invalidOperation ;
                   }
                   returnCode = 200;
                   break;
@@ -621,7 +627,7 @@ void handlerSwitchValue(void)
     {
       root["ErrorMessage"] = "SwitchID value out of range.";
       root["ErrorNumber"] = invalidValue ;
-      returnCode = 400;
+      returnCode = 200;
     }            
     
     root.printTo(message);
@@ -955,7 +961,7 @@ void handlerStatus(void)
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
     int i;
     int returnCode = 200;
-    String argToSearchFor[] = { "switchId", "name", "description", "type", "pin", "min", "max", "step", "writeable" };
+    String argToSearchFor[9] = { "switchId", "name", "description", "type", "writeable", "pin", "min", "max", "step" };
     
     DEBUGS1("Entered handlerSetupSwitches");
     if ( server.method() == HTTP_POST || server.method() == HTTP_PUT || server.method() == HTTP_GET )
@@ -980,15 +986,17 @@ void handlerStatus(void)
         //Check for all args present 
         int i=1;
         int foundCount = 0;
-        for ( i=1; i< server.args() && ( allFound == true) ; i++ ) 
+        for ( i=1; i < 9; i++ ) 
         {
           arg = argToSearchFor[i] + id;
+          DEBUGS1("handlerSwitchSetup - arg sought: ");DEBUGSL1(arg.c_str());
+
           if( hasArgIC( arg, server, false )  )
           {
-            allFound &= true;
-            foundCount ++;
             DEBUGS1("handlerSwitchSetup - arg found ");DEBUGSL1(arg.c_str());
             DEBUGS1("handlerSwitchSetup - foundCount ");DEBUGSL1(foundCount);
+            allFound &= true;
+            foundCount ++;
           }  
           else 
           {
@@ -1001,6 +1009,7 @@ void handlerStatus(void)
         {
           enum SwitchType localType = (enum SwitchType) server.arg( argToSearchFor[3] + id ).toInt();
           DEBUGS1( "handlerSwitchSetup: looking for type: ");DEBUGSL1( localType );
+          
           if ( ( localType == SWITCH_RELAY_NC ) || ( localType == SWITCH_RELAY_NO ) )
           {
             DEBUGSL1( "handlerSwitchSetup: found analogue switch type - only expecting 4 variables");
@@ -1088,10 +1097,22 @@ void handlerStatus(void)
           }
         }
         
+        //Switch writeable
+        arg = argToSearchFor[4] + id;
+        if( hasArgIC( arg, server, false ) && returnCode == 200 )
+        {
+          writeable = (bool) server.arg( arg ).equalsIgnoreCase( "on" );
+          DEBUGS1("handlerSwitchSetup - writeable value found:");DEBUGSL1( writeable );
+        }
+        //If writeable is not checked, chrome doesn't send it as a form variable - hence its missing. 
+        //So we have to assume its false if missing. Solved by replacing a checkbox with a pre-checked radio  
+        else 
+          writeable = false;
+        
         if( foundCount == 4 && allFound ) 
         {
           //Switch pin
-          arg = argToSearchFor[4] + id;
+          arg = argToSearchFor[5] + id;
           if( hasArgIC( arg, server, false ) && returnCode == 200 )
           {
             pin = (int) server.arg( arg ).toInt();
@@ -1116,7 +1137,7 @@ void handlerStatus(void)
           }
     
           //Switch min
-          arg = argToSearchFor[5] + id;
+          arg = argToSearchFor[6] + id;
           if( hasArgIC( arg, server, false ) && returnCode == 200  )
           {
             min = server.arg( arg ).toDouble();            
@@ -1141,7 +1162,7 @@ void handlerStatus(void)
           }
     
           //Switch max
-          arg = argToSearchFor[6] + id;
+          arg = argToSearchFor[7] + id;
           if( hasArgIC( arg, server, false ) && returnCode == 200 )
           {
             max = (float) server.arg( arg ).toDouble();
@@ -1166,7 +1187,7 @@ void handlerStatus(void)
           }
     
           //Switch step
-          arg = argToSearchFor[7] + id;
+          arg = argToSearchFor[8] + id;
           if( hasArgIC( arg, server, false ) && returnCode == 200 )
           {
             step = (float) server.arg( arg ).toDouble();
@@ -1190,14 +1211,7 @@ void handlerStatus(void)
             }            
           }
         }//end of exclusion for disabled fields based on switch types. 
-  
-        //Switch writeable
-        arg = argToSearchFor[8] + id;
-        if( hasArgIC( arg, server, false ) && returnCode == 200 )
-        {
-          writeable = (bool) ( server.arg( arg ).compareTo( "On") == 0 )? true: false;
-        }  
-      
+
       /*
       Apply some logic to the combinations of values to check for errors
       Not checking for :  duplicates (names/description/pins)
@@ -1226,19 +1240,22 @@ void handlerStatus(void)
             switchEntry[id]->writeable = writeable;
             //Update current value to fall within new range 
             switchEntry[id]->value = switchEntry[id]->min;
+            //Save the new setup
+            saveToEeprom();
+            returnCode = 200;
           }         
         }
       }
       else
       {
         err = "Switch Id ('switchId') missing ";
-        returnCode = 0x403; //check
+        returnCode = 401; //check
       }                         
     }//End of GET/POST/PUT
     else //Not an acceptable HTML verb
     { 
       err = "Not a supported HTML verb (PUT/GET/POST)";
-      returnCode = 0x401; //check    
+      returnCode = 403; //check    
     }
 
     DEBUGSL1("handlerSwitchSetup - leaving ");
@@ -1684,14 +1701,26 @@ label em { position: absolute;right: 5px;top: 20px;}\
   htmlForm += "<label for=\"writeable";
   htmlForm += i;
   htmlForm += "\"><span>Writeable</span></label>";
-  htmlForm += " &nbsp; <input type=\"checkbox\" id=\"writeable";
+  htmlForm += " &nbsp; <input type=\"radio\" value=\"on\" id=\"writeable";
   htmlForm += i;
   htmlForm += "\" name=\"writeable";
   htmlForm += i;
   htmlForm += "\""; 
   if( switchEntry[i]->writeable )
-    htmlForm += "checked";
+    htmlForm += " checked";
+  htmlForm += ">";
+  htmlForm += "<label for=\"writeableB";
+  htmlForm += i;
+  htmlForm += "\"><span>ReadOnly</span></label>";
+  htmlForm += " &nbsp; <input type=\"radio\" value=\"off\" id=\"writeableB";
+  htmlForm += i;
+  htmlForm += "\" name=\"writeable";
+  htmlForm += i;
+  htmlForm += "\""; 
+  if( !switchEntry[i]->writeable )
+    htmlForm += " checked";
   htmlForm += "> <br>";
+ 
   htmlForm += "<input type=\"submit\" value=\"Update\">";
   htmlForm += "</fieldset> "; 
   htmlForm += "</form></div>";
