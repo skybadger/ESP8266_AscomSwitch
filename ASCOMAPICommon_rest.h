@@ -147,7 +147,6 @@ void handleConnected(void)
     { 
        DEBUGSL1( "Entered handleConnected::PUT" );
 
-      //don't like the logic here - if its already connected for this client we should refuse a connect. 
       if( hasArgIC( argToSearchFor, server, false ) && 
           server.arg(argToSearchFor).length() > 0  && 
           server.arg(argToSearchFor).equalsIgnoreCase("true" ) )
@@ -163,42 +162,71 @@ void handleConnected(void)
             root.printTo(message);
             outputCode = 200;
           }
-          else
+          else if ( connectedClient == 0 )
           {
-          DEBUGSL1( "Entered handleConnected::PUT::True::already connected but not by this client - error" );        
+            DEBUGSL1( "Entered handleConnected::PUT::True::already connected by anonymous client - OK" );        
             //Check error numbers
-            jsonResponseBuilder( root, clientID, transID, "Connected", notConnected , "Setting connected when already connected by different client" );        
+            jsonResponseBuilder( root, clientID, transID, "Connected", Success , "" );        
             root["Value"]= connected;    
             root.printTo(message);
-            outputCode = 400;            
+            outputCode = 200;            
+          }
+          else
+          {
+            DEBUGSL1( "Entered handleConnected::PUT::True::already connected by different client - bad" );        
+            //Check error numbers
+            jsonResponseBuilder( root, clientID, transID, "Connected", valueNotSet , "Already connected by different client" );        
+            root["Value"]= connected;    
+            root.printTo(message);
+            outputCode = 200;   
           }
         }
-        else //OK
+        else //Not currently connected and setting to TRUE  
         {  
-          DEBUGSL1( "Entered handleConnected::PUT::True::setting connected - OK" );
+          DEBUGSL1( "Entered handleConnected::PUT::True::New client setting connected from false - OK" );
           connected = true;
           connectedClient = clientID;
-          jsonResponseBuilder( root, clientID, transID, "Connected", Success, "Setting connected OK" );        
+          jsonResponseBuilder( root, clientID, transID, "Connected", Success, "" );        
           root["Value"]= connected;    
           root.printTo(message);
           outputCode = 200;          
         }
       }
-      else //set to false
+      else //New setting to false
       {
-        if ( connected ) //
+        if ( connected )
         {
-          DEBUGSL1( "Entered handleConnected::PUT::False::set unconnected - OK" );
-          connected = false; //OK   
-          connectedClient = 0;       
-          jsonResponseBuilder( root, clientID, transID, "Connected", Success , "Disconnected OK" );        
-          root["Value"]= connected;    
-          root.printTo(message);
-          outputCode = 200;
+          if( clientID == connectedClient )
+          {
+            DEBUGSL1( "Entered handleConnected::PUT::False::Owning client set unconnected - OK" );
+            connected = false; //OK   
+            connectedClient = 0;       
+            jsonResponseBuilder( root, clientID, transID, "Connected", Success , "" );        
+            root["Value"]= connected;    
+            root.printTo(message);
+            outputCode = 200;
+          }
+          else if( connectedClient == 0 )
+          {
+            DEBUGSL1( "Entered handleConnected::PUT::False::Null client set unconnected - OK" );
+            connected = false; //OK   
+            connectedClient = 0;       
+            jsonResponseBuilder( root, clientID, transID, "Connected", Success , "" );        
+            root["Value"]= connected;    
+            root.printTo(message);
+            outputCode = 200;            
+          }
+          else
+          {
+            DEBUGSL1( "Entered handleConnected::PUT::False:: Unknown client set unconnected - Bad" );    
+            jsonResponseBuilder( root, clientID, transID, "Connected", valueNotSet , "Unknown client attempting to set connected False" );        
+            root["Value"]= connected;    
+            root.printTo(message);
+            outputCode = 200;            
+          }
         }
-        else
+        else //Not already connected and setting FALSE
         {
-          //Check error numbers
           DEBUGSL1( "Entered handleConnected::PUT::False::not already connected - ignoring" );
           jsonResponseBuilder( root, clientID, transID, "Connected", Success , "" );        
           root["Value"]= connected; 

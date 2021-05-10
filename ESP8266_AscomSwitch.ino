@@ -125,7 +125,7 @@ void setup_wifi()
   int zz = 0;
   WiFi.hostname( myHostname );
   WiFi.mode(WIFI_STA); 
-  WiFi.begin( ssid1, password1 );
+  WiFi.begin( ssid2, password2 );
   Serial.print("Searching for WiFi..");
   while (WiFi.status() != WL_CONNECTED) 
   {
