@@ -37,6 +37,11 @@ void setDefaults( void )
   strcpy ( thisID, myHostname );
 
   udpPort = ALPACA_DISCOVERY_PORT;
+
+  if ( Location != nullptr ) 
+     free ( Location );
+  Location = (char*) calloc( MAX_NAME_LENGTH, sizeof( char)  );       
+  strcpy( Location, "Default Location" ); 
   
   //Allocate storage for Number of Switch settings
   numSwitches = defaultNumSwitches;
@@ -60,6 +65,7 @@ void setDefaults( void )
     tempName.concat( i );
     switchEntry[i]->switchName = (char*) calloc( MAX_NAME_LENGTH, sizeof(char) );
     strcpy( switchEntry[i]->switchName, tempName.c_str() );
+
     switchEntry[i]->writeable = true;    
     switchEntry[i]->type = SWITCH_RELAY_NO;
     switchEntry[i]->pin = 0;
@@ -115,6 +121,11 @@ void saveToEeprom( void )
   eepromAddr += MAX_NAME_LENGTH;   
   DEBUGS1( "Written hostname: ");DEBUGSL1( myHostname );
 
+  //Mgmt Location
+  EEPROMWriteString( eepromAddr, Location, MAX_NAME_LENGTH );
+  eepromAddr += MAX_NAME_LENGTH;   
+  DEBUGS1( "Written Location: ");DEBUGSL1( Location );
+  
   //Switch state
   for ( int i = 0; i< numSwitches; i++ )
   {
@@ -215,6 +226,13 @@ void setupFromEeprom( void )
   strcpy ( thisID, myHostname );
   DEBUGS1( "Read MQTT ID: ");DEBUGSL1( thisID );
   
+  if( Location != nullptr )
+    free( Location );
+  Location = (char*) calloc( MAX_NAME_LENGTH, sizeof( char ) );  
+  EEPROMReadString( eepromAddr, Location, MAX_NAME_LENGTH );
+  eepromAddr  += MAX_NAME_LENGTH * sizeof(char);  
+  DEBUGS1( "Read Location: ");DEBUGSL1( Location );
+
   //free old switch entries
   if ( switchEntry != nullptr )
   {

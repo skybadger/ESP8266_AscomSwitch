@@ -174,11 +174,11 @@ void handlerMaxswitch(void)
 
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "MaxSwitch", Success , "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "MaxSwitch", Success , "" );    
     root["Value"] = numSwitches;
     
     root.printTo(message);
-    server.send(200, "text/json", message);
+    server.send(200, "application/json", message);
     return ;
 }
 
@@ -195,7 +195,7 @@ void handlerCanWrite(void)
 
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "CanWrite", Success , "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "CanWrite", Success , "" );    
 
     if( hasArgIC( argToSearchFor, server, false ) )
     {
@@ -219,7 +219,7 @@ void handlerCanWrite(void)
         root["ErrorNumber"] = (int) invalidOperation ;       
     }
     root.printTo(message);
-    server.send( statusCode , "text/json", message);
+    server.send( statusCode , "application/json", message);
     return ;
 }
 
@@ -240,7 +240,7 @@ void handlerSwitchState(void)
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "SwitchState", Success , "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchState", Success , "" );    
 
     if( hasArgIC( argToSearchFor[0], server, false ) )
       switchID = server.arg( argToSearchFor[0] ).toInt();
@@ -250,7 +250,7 @@ void handlerSwitchState(void)
        root["ErrorNumber"] = invalidOperation;
        root["ErrorMessage"] = output; 
        returnCode = 400;
-       server.send(returnCode, "text/json", message);
+       server.send(returnCode, "application/json", message);
        return;
     }
  
@@ -327,7 +327,7 @@ void handlerSwitchState(void)
     }
 
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -344,7 +344,7 @@ void handlerSwitchDescription(void)
           
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "SwitchDescription", Success, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchDescription", Success, "" );    
 
     if( hasArgIC( argToSearchFor, server, false ) )
     {
@@ -366,7 +366,7 @@ void handlerSwitchDescription(void)
     }
 
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -384,7 +384,7 @@ void handlerSwitchName(void)
     String argToSearchFor[2] = {"Id", "Name"};
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "SwitchName", Success, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchName", Success, "" );    
     
     if( hasArgIC( argToSearchFor[0], server, false ) )
     {
@@ -438,7 +438,7 @@ void handlerSwitchName(void)
     }
 
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -457,7 +457,7 @@ void handlerSwitchType(void)
     String argToSearchFor[2] = {"Id", "Name"};
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "SwitchType", 0, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchType", 0, "" );    
     
     if( hasArgIC( argToSearchFor[0], server, false ) )
     {
@@ -469,7 +469,7 @@ void handlerSwitchType(void)
        root["ErrorMessage"]= "Missing switchID argument";
        root["ErrorNumber"] = invalidValue ;     
        root.printTo(message);
-       server.send(returnCode, "text/json", message);
+       server.send(returnCode, "application/json", message);
        return;
     }
      
@@ -512,7 +512,7 @@ void handlerSwitchType(void)
        root["ErrorNumber"] = invalidValue ;
     }
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -531,7 +531,7 @@ void handlerSwitchValue(void)
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "SwitchValue", 0, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchValue", 0, "" );    
     
     if ( hasArgIC( argToSearchFor[0], server, false ) )
     {
@@ -543,7 +543,7 @@ void handlerSwitchValue(void)
       root["ErrorNumber"] = invalidValue ;
       returnCode = 400;      
       root.printTo(message);
-      server.send(returnCode, "text/json", message);
+      server.send(returnCode, "application/json", message);
       return;      
     }
       
@@ -631,7 +631,7 @@ void handlerSwitchValue(void)
     }            
     
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -648,7 +648,7 @@ void handlerMinSwitchValue(void)
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "MinSwitchValue", Success, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "MinSwitchValue", Success, "" );    
     
     if ( hasArgIC( argToSearchFor, server, false  ) )
     {
@@ -671,7 +671,7 @@ void handlerMinSwitchValue(void)
       returnCode = 400;
     }
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -688,7 +688,7 @@ void handlerMaxSwitchValue(void)
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "MaxSwitchValue", Success, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "MaxSwitchValue", Success, "" );    
 
     if ( hasArgIC(argToSearchFor, server, false ) )
     {
@@ -712,7 +712,7 @@ void handlerMaxSwitchValue(void)
        returnCode = 400;
     }
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -729,7 +729,7 @@ void handlerSwitchStep(void)
     
     DynamicJsonBuffer jsonBuffer(256);
     JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, "SwitchStep", Success, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchStep", Success, "" );    
 
     if ( hasArgIC(argToSearchFor, server, false ) )
     {
@@ -753,7 +753,7 @@ void handlerSwitchStep(void)
        returnCode = 400;    
     }
     root.printTo(message);
-    server.send(returnCode, "text/json", message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -768,10 +768,10 @@ void handlerNotFound()
   uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
   DynamicJsonBuffer jsonBuffer(250);
   JsonObject& root = jsonBuffer.createObject();
-  jsonResponseBuilder( root, clientID, transID, "HandlerNotFound", invalidOperation , "No REST handler found for argument - check ASCOM Switch v2 specification" );    
+  jsonResponseBuilder( root, clientID, transID, serverTransID++, "HandlerNotFound", invalidOperation , "No REST handler found for argument - check ASCOM Switch v2 specification" );    
   root["Value"] = 0;
   root.printTo(message);
-  server.send(responseCode, "text/json", message);
+  server.send(responseCode, "application/json", message);
 }
 
 void handlerRestart()
@@ -792,10 +792,10 @@ void handlerNotImplemented()
 
   DynamicJsonBuffer jsonBuffer(250);
   JsonObject& root = jsonBuffer.createObject();
-  jsonResponseBuilder( root, clientID, transID, "HandlerNotFound", notImplemented  , "No REST handler implemented for argument - check ASCOM Dome v2 specification" );    
+  jsonResponseBuilder( root, clientID, transID, serverTransID++, "HandlerNotFound", notImplemented  , "No REST handler implemented for argument - check ASCOM Dome v2 specification" );    
   root["Value"] = 0;
   root.printTo(message);
-  server.send(responseCode, "text/json", message);
+  server.send(responseCode, "application/json", message);
 }
 
 //GET ​/switch​/{device_number}​/status
@@ -803,25 +803,27 @@ void handlerNotImplemented()
 void handlerStatus(void)
 {
     String message, timeString;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
+    uint32_t clientID = 0;//(uint32_t)server.arg("ClientID").toInt();
+    uint32_t transID = 0;//(uint32_t)server.arg("ClientTransactionID").toInt();
     int i=0;
-    int returnCode = 400;
+    int returnCode = 200;
     
-    DynamicJsonBuffer jsonBuffer(512);
+    DynamicJsonBuffer jsonBuffer(1024); //Uplifted in size = 256 + numSwitches * ( sizeof ( switchentry ) + 3* MAX_NAME_LENGTH )
     JsonObject& root = jsonBuffer.createObject();
     JsonArray& entries = root.createNestedArray( "switches" );
-    jsonResponseBuilder( root, clientID, transID, "Status", 0, "" );    
+    jsonResponseBuilder( root, clientID, transID, serverTransID++, "Status", 0, "" );    
     
     root["time"] = getTimeAsString( timeString );
     root["host"] = myHostname;
     root["connected"] = (connected)?"true":"false";
     root["clientId"] = connectedClient;
+
     
     for( i = 0; i < numSwitches; i++ )
     {
-      //Can I re-use a single object or do I need to create a new one each time? 
+      //Can I re-use a single object or do I need to create a new one each time? A: new one each time. 
       JsonObject& entry = jsonBuffer.createObject();
+
       entry["description"] = switchEntry[i]->description;
       entry["name"]        = switchEntry[i]->switchName;
       entry["type"]        = (int) switchEntry[i]->type;      
@@ -839,8 +841,9 @@ void handlerStatus(void)
       entries.add( entry );
     }
     Serial.println( message);
-    root.prettyPrintTo(message);
-    server.send(returnCode, "text/json", message);
+    
+    root.printTo(message);
+    server.send(returnCode, "application/json", message);
     return;
 }
 
@@ -854,11 +857,18 @@ void handlerStatus(void)
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
     uint32_t switchID = -1;
     
-    int returnCode = 400;
+    int returnCode = 200;
     if ( server.method() == HTTP_GET )
     {
         message = setupFormBuilder( message, err );      
         server.send( returnCode, "text/html", message ); 
+    }
+    else
+    {
+        message = "<!DOCTYPE html> <html><body><p> Use <a href=\"http://";
+        message.concat( myHostname );
+        message.concat( "/setup\"> to configure </a> the switch for use</p></body></html>");
+        server.send( 400, "text/html", message ); 
     }
  }
  
@@ -904,6 +914,49 @@ void handlerStatus(void)
     }
     server.send(returnCode, "text/html", message);
     return;
+ }
+
+/*
+  * Handler to update the hostname from the form.
+  */
+ void handlerSetLocation(void) 
+ {
+    String message, timeString, err= "";
+    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
+    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
+    uint32_t switchID = -1;
+    
+    int returnCode = 400;
+    String argToSearchFor[] = { "location", };
+     
+    if ( server.method() == HTTP_POST || server.method() == HTTP_PUT || server.method() == HTTP_GET)
+    {
+        if( hasArgIC( argToSearchFor[0], server, false )  )
+        {
+          String newLocation = server.arg(argToSearchFor[0]) ;
+          //process form variables.
+          if( newLocation.length() > 0 && newLocation.length() < MAX_NAME_LENGTH-1 )
+          {
+            //process new hostname
+            strncpy( Location, newLocation.c_str(), MAX_NAME_LENGTH );
+          }
+          else
+             err = "Location details too long";
+
+          message = setupFormBuilder( message, err );      
+          returnCode = 200;    
+          saveToEeprom();
+          server.send(returnCode, "text/html", message);
+        }
+    }
+    else
+    {
+      returnCode=400;
+      err = "Bad HTTP request verb";
+      message = setupFormBuilder( message, err );      
+    }
+    server.send(returnCode, "text/html", message);
+    return;    
  }
 
  /*
@@ -1473,18 +1526,36 @@ label em { position: absolute;right: 5px;top: 20px;}\
 
   //Device settings hostname and number of switches on this device
   htmlForm += "<div class=\"row\">";
-  htmlForm += "<div class=\"col-sm-12\"><h2> Enter new hostname for device</h2><br/></div>";
+  htmlForm += "<div class=\"col-sm-12\"><h2> Enter new hostname for device</h2><br/>";
   htmlForm += "<p>Changing the hostname will cause the device to reboot and may change the IP address!</p></div>";
-  htmlForm += "<div class=\"row float-left\" id=\"deviceAttrib\" bgcolor='blue'>\n";
+  htmlForm += "<div class=\"row float-left\" id=\"deviceAttrib\" bgcolor='blue'>";
   htmlForm += "<form method=\"POST\" id=\"hostname\" action=\"http://";
   htmlForm.concat( myHostname );
   htmlForm += "/setup/hostname\">";
-  htmlForm += "<input type=\"text\" name=\"hostname\" maxlength=\"25\" value=\"";
+  htmlForm += "<input type=\"text\" name=\"hostname\" maxlength=\"";
+  htmlForm += String(MAX_NAME_LENGTH).c_str( );
+  htmlForm += "\" value=\"";
   htmlForm.concat( myHostname );
   htmlForm += "\"/>";
   htmlForm += "<label for=\"hostname\" > Hostname </label>";
   htmlForm += "<input type=\"submit\" value=\"Update\" />";
-  htmlForm += "</form></div>";
+  htmlForm += "</form></div></div>";
+
+  //Device settings location
+  htmlForm += "<div class=\"row\">";
+  htmlForm += "<div class=\"col-sm-12\"><h2> Enter location to be reported by Management API for device</h2><br/></div>";
+  htmlForm += "<div class=\"row float-left\" id=\"deviceAttrib\" bgcolor='blue'>";
+  htmlForm += "<form method=\"POST\" id=\"location\" action=\"http://";
+  htmlForm.concat( myHostname );
+  htmlForm += "/setup/location\">";
+  htmlForm += "<input type=\"text\" name=\"location\" maxlength=\"";
+  htmlForm += String(MAX_NAME_LENGTH).c_str( );
+  htmlForm += "\" value=\"";
+  htmlForm.concat( Location );
+  htmlForm += "\"/>";
+  htmlForm += "<label for=\"location\" > Location </label>";
+  htmlForm += "<input type=\"submit\" value=\"Update\" />";
+  htmlForm += "</form></div></div>";  
 
 //<div class="row float-left">
 //<h2>Configure switches</h2><br>
@@ -1506,7 +1577,9 @@ label em { position: absolute;right: 5px;top: 20px;}\
   htmlForm.concat( myHostname );
   htmlForm += "/setup/numswitches\" method=\"POST\" id=\"switchcount\" >";
   htmlForm += "<label for=\"numSwitches\" >Number of switch components</label>";
-  htmlForm += "<input type=\"number\" name=\"numSwitches\" min=\"1\" max=\"16\" value=\"";
+  htmlForm += "<input type=\"number\" name=\"numSwitches\" min=\"1\" max=\"";
+  htmlForm += String( MAXSWITCH ).c_str();
+  htmlForm += "\" value=\"";
   htmlForm += numSwitches;
   htmlForm += "\">";
   htmlForm += "<input type=\"submit\" value=\"Update\"> </form> </div></div>";
@@ -1518,7 +1591,7 @@ label em { position: absolute;right: 5px;top: 20px;}\
 
   htmlForm += "<div class=\"row float-left\"> ";
   htmlForm += "<h2>Switch configuration </h2>";
-  htmlForm += "<br><p>To configure the switche types and limits, select the switch you need below.</p></div>";
+  htmlForm += "<br><p>To configure the switch types and limits, select the switch you need below.</p></div>";
   
 //<div class="row float-left"> 
 //<form action="/api/v1/switch/0/setupswitch" Method="PUT">
@@ -1562,7 +1635,9 @@ label em { position: absolute;right: 5px;top: 20px;}\
   htmlForm += i;
   htmlForm += "\" value=\"";
   htmlForm += switchEntry[i]->switchName;
-  htmlForm += "\" maxlength=\"25\"><br>";
+  htmlForm += "\" maxlength=\"";
+  htmlForm += String(MAX_NAME_LENGTH).c_str( );
+  htmlForm += "\"><br>";
      
   //Description
   htmlForm += "<label for=\"description";
@@ -1574,7 +1649,9 @@ label em { position: absolute;right: 5px;top: 20px;}\
   htmlForm += i;
   htmlForm += "\" value=\"";
   htmlForm += switchEntry[i]->description;
-  htmlForm += "\" maxlength=\"25\"><br>";
+  htmlForm += "\" maxlength=\"";
+  htmlForm += String(MAX_NAME_LENGTH).c_str( );
+  htmlForm += "\"><br>";
   
   //Type - Hardware implementation detail exposed for configuration
   htmlForm += "<label for=\"type";
@@ -1723,6 +1800,7 @@ label em { position: absolute;right: 5px;top: 20px;}\
     htmlForm += " checked";
   htmlForm += "> <br>";
  
+  //Form submit button. 
   htmlForm += "<input type=\"submit\" value=\"Update\">";
   htmlForm += "</fieldset> "; 
   htmlForm += "</form></div>";

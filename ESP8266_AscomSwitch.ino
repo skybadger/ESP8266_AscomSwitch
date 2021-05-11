@@ -5,17 +5,20 @@
  Supports web interface on port 80 returning json string
 
 Notes: 
+ This design now requires a larger memory size than 1MB for OTA operation and to return the html pages and debug output correctly. 
  Step field is interpreted as number of digital steps in full range from min to max. ie a 10-bit DAC will allow a value of 1024 
+ The i2c pin connections need to be reversed netween ASW01 and ASW 02. ASW01 is the normal way around. 
  
  To do:
-  Complete Setup page - in progress
- Complete support for device-based PWM. 
+ Complete Setup page - in progress
+ Complete support for device-based PWM
  Complete support for DAC output
   
  Done: 
  Complete EEPROM calls - done.
  PCF8574 library added to support switches - needs physical integration testing.
  Add suport for PWM hardware chip(s).
+ Added support for measuring the voltages we are switching - unreg source input, reg 5V and 3.3v - ASW01 h/w only has the first two channels implemented.
  8574 DIP16 pinout is: 
  1 A0       15 Vdd
  2 A1       15 SDA
@@ -52,6 +55,11 @@ telnet espASW01 32272 (UDP)
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <ArduinoJson.h>  //https://arduinojson.org/v5/api/
+#define MAX_TIME_INACTIVE 0 //to turn off the de-activation of a telnet session
+#include "RemoteDebug.h"  //https://github.com/JoaoLopesF/RemoteDebug
+
+//Create a remote debug object
+RemoteDebug Debug;
 
 extern "C" { 
 //Ntp dependencies - available from v2.4
@@ -65,11 +73,10 @@ extern "C" {
 #include <String.h> 
 #include <user_interface.h>
             }
-
 time_t now; //use as 'gmtime(&now);'
 
 //Strings
-const char* defaultHostname = "espASW01";
+const char* defaultHostname = "espASW00";
 char* myHostname = nullptr;
 
 //MQTT settings
@@ -109,22 +116,48 @@ SwitchEntry** switchEntry;
 //  PCF8574A  0x38 to 0x3F
 //  TI 8574A is 0x70 to 0x7E, pullups on address pins add to base 0x70
 //  Waveshare expander board is address 160
-PCF8574 switchDevice( 160, Wire );
+PCF8574 switchDevice; //top 3 bits set only. 
 bool switchPresent = false;
 uint32_t switchStatus = 0;
+
+#if defined USE_ADC
+#include <Adafruit_ADS1015.h>
+// Adafruit_ADS1115 adc;  /* Use this for the 16-bit version */
+Adafruit_ADS1015 adc;     /* Use this for the 12-bit version */
+bool adcPresent = false;
+uint16_t adcReading[4] = {0,0,0,0}; 
+float adcScaleFactor[4] = { 22.3/3.3, 10.0/3.3, 5.5/3.3, 1.0 }; //scale factors from the resistor network for each input
+// AD0 is single ended 0-25v raw DC input
+// AD1 is single ended 0-6v regulated DC input. 
+// AD2 is single ended 0-3.3v regulated DC input. 
+  //                                                                ADS1015  ADS1115
+  //                                                                -------  -------
+  // ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
+  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
+  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
+  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
+  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
+  // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
+float adcGainFactor[] = { 0.000125, 0.00025, 0.0005, 0.001, 0.002, 0.003 };
+int adcChannel = 0;
+int lastChannel = 2;
+#endif 
+
+const int eepromSize = 4 + (MAXSWITCH * MAX_NAME_LENGTH * 3) + (2* sizeof(int) )  + (MAXSWITCH * ( sizeof(SwitchEntry) + (2*MAX_NAME_LENGTH) ) ) + 10;
 
 //Order sensitive
 #include "Skybadger_common_funcs.h"
 #include "JSONHelperFunctions.h"
-#include "ASCOMAPICommon_rest.h" //ASCOM common driver web handlers. 
+#include "ASCOMAPICommon_rest.h" //From library/ASCOM_REST - ASCOM common driver descriptors and handlers. Override as required. 
 #include "Webrelay_eeprom.h"
 #include "ESP8266_relayhandler.h"
+#include "AlpacaManagement.h"
 
 void setup_wifi()
 {
   int zz = 0;
-  WiFi.hostname( myHostname );
   WiFi.mode(WIFI_STA); 
+  WiFi.hostname( myHostname );
   WiFi.begin( ssid2, password2 );
   Serial.print("Searching for WiFi..");
   while (WiFi.status() != WL_CONNECTED) 
@@ -152,6 +185,7 @@ void setup_wifi()
 
 void setup()
 {
+  int error = PCF8574_OK;
   Serial.begin( 115200, SERIAL_8N1, SERIAL_TX_ONLY);
   Serial.println(F("ESP starting."));
   
@@ -161,14 +195,15 @@ void setup()
   
   //Setup default data structures
   DEBUGSL1("Setup EEprom variables"); 
-  EEPROM.begin( 4+ (MAXSWITCH*50) + (MAXSWITCH*sizeof(SwitchEntry)) + (2*MAX_NAME_LENGTH) + (2* sizeof(int) ) );
+  EEPROM.begin( eepromSize );
+  
   //setDefaults();
   setupFromEeprom();
   DEBUGSL1("Setup eeprom variables complete."); 
   
   // Connect to wifi 
   setup_wifi();                   
-  
+
   //Open a connection to MQTT
   DEBUGSL1("Setting up MQTT."); 
   client.setServer( mqtt_server, 1883 );
@@ -183,24 +218,45 @@ void setup()
   pinMode(2, OUTPUT);
   //GPIO 3 (normally RX on -01) swap the pin to a GPIO or PWM. 
   pinMode(3, OUTPUT );
-  
-  //I2C setup SDA pin 0, SCL pin 2 on ESP-01
+
+  //https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
+  //My normal I2C setup is SDA GPIO 0 on pin2, SCL GPIO 2 on pin 3 on the ESP-01
+  //for the small board in the dome switch I had to swap this around.
   //I2C setup SDA pin 5, SCL pin 4 on ESP-12
-  Wire.begin(0, 2);
+  //Wire.begin( 2, 0 );//Normal arrangement
+  Wire.begin( 0, 2 );//was 0, 2 for normal arrangement, trying 2, 0 for ASW02
   Wire.setClock(100000 );//100KHz target rate
+
+  //Debugging over telnet setup
+  // Initialize the server (telnet or web socket) of RemoteDebug
+  //Debug.begin(HOST_NAME, startingDebugLevel );
+  Debug.begin( WiFi.hostname().c_str(), Debug.ERROR ); 
+  Debug.setSerialEnabled(true);//until set false 
+  // Options
+  // Debug.setResetCmdEnabled(true); // Enable the reset command
+  // Debug.showProfiler(true); // To show profiler - time between messages of Debug
+  //In practice still need to use serial commands until debugger is up and running.. 
+  debugE("Remote debugger enabled and operating");
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+  String outbuf = scanI2CBus();
+  Serial.println( outbuf.c_str() );
+
+////////////////////////////////////////////////////////////////////////////////////////
   
   DEBUGSL1("Setup relay controls");
   switchPresent = false;
   
-  //initial switch state setup - set pins high to read inputs, drive pins low for low outputs. 
-  switchDevice.begin( (const uint8_t) 0b11111111 );
-  DEBUGS1("Switch device - lastError is ");DEBUGSL1( switchDevice.lastError() );
-  if ( switchDevice.lastError()!= PCF8574_OK )
+  //initial switch state setup - set pins high to read inputs, drive pins low for low outputs. Low outputs activate the relays.
+  switchDevice.begin( 160, Wire, (const uint8_t) 0xFF );
+  error = switchDevice.lastError();
+  debugD( "Switch device - lastError is %i", error );
+  
+  if ( error != PCF8574_OK )
   {
     switchPresent = false;
-    DEBUGSL1( "ASCOMSwitch : Unable to find PCF8574 switch device \n");
-    String msg = scanI2CBus();
-    DEBUGSL1( msg );
+    debugD( "ASCOMSwitch : Unable to find switch PCF8574 device");
   }
   else
   {
@@ -209,17 +265,22 @@ void setup()
     switchDevice.write(0, 1);delay(1000);
     switchDevice.write(0, 0);delay(1000);
     switchDevice.write(0, 1);
-    DEBUGSL1( "ASCOMSwitch : PCF8574 switch device found\n");
+    debugV( "ASCOMSwitch : PCF8574 switch device found\n");
   }
     
-  DEBUGSL1( "ASCOMSwitch : Setting up switches from components \n");
+  debugI( "ASCOMSwitch : Setting up switches from components \n");
+  //Relays use active low - which is the purpose of the reverseRelayLogic flag.
+  //If they read as high then they are not activated ...
   for ( int i=0;i< numSwitches ; i++ )
   {
     switch (switchEntry[i]->type)
     {
       case SWITCH_RELAY_NC:
       case SWITCH_RELAY_NO:
-        switchEntry[i]->value = ( switchDevice.read( i ) == 1 )? 1.0F: 0.0F ;
+        if( reverseRelayLogic ) 
+          switchEntry[i]->value = ( switchDevice.read( i ) == 1 )? 0.0F: 1.0F ;
+        else
+          switchEntry[i]->value = ( switchDevice.read( i ) == 1 )? 1.0F: 0.0F ;
         break;
       case SWITCH_PWM:
       case SWITCH_ANALG_DAC:
@@ -229,8 +290,23 @@ void setup()
         break;
     }
   }
-  switchStatus  = switchDevice.read8();
-  DEBUGS1( "switchStatus: "); DEBUGSL1( switchStatus );
+  switchStatus = switchDevice.read8();
+  debugI( "switchStatus: %i ", switchStatus );
+
+#if defined USE_ADC
+  Serial.print("Probe AD1015: ");
+  //                                                                ADS1015  ADS1115
+  //                                                                -------  -------
+  // ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
+  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
+  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
+  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
+  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
+  // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
+  adc.begin();
+  adc.setGain(GAIN_ONE);
+  adcPresent = true;//No function to allow us to sense the ADC. 
+#endif 
 
   //Setup webserver handler functions
   server.on("/", handlerStatus );
@@ -242,6 +318,8 @@ void setup()
   preUri += "/";
   preUri += instanceNumber;
   preUri += "/";
+
+  //Generic ASCOM descriptor functions
   server.on("/api/v1/switch/0/action",              HTTP_PUT, handleAction );
   server.on("/api/v1/switch/0/commandblind",        HTTP_PUT, handleCommandBlind );
   server.on("/api/v1/switch/0/commandbool",         HTTP_PUT, handleCommandBool );
@@ -253,7 +331,7 @@ void setup()
   server.on("/api/v1/switch/0/interfaceversion",    HTTP_GET, handleInterfaceVersionGet );
   server.on("/api/v1/switch/0/name",                HTTP_GET, handleNameGet );
   server.on("/api/v1/switch/0/supportedactions",    HTTP_GET, handleSupportedActionsGet );
-
+   
   //Switch-specific functions
   server.on("/api/v1/switch/0/maxswitch",           HTTP_GET, handlerMaxswitch );
   server.on("/api/v1/switch/0/canwrite",            HTTP_GET, handlerCanWrite );
@@ -268,15 +346,25 @@ void setup()
   server.on("/api/v1/switch/0/maxswitchvalue",      HTTP_GET, handlerMaxSwitchValue );
   server.on("/api/v1/switch/0/switchstep",          HTTP_GET, handlerSwitchStep );
 
-//Additional non-ASCOM custom setup calls
+  //Management API
+  server.on("/management/description",              HTTP_GET, handleMgmtDescription );
+  server.on("/management/apiversions",              HTTP_GET, handleMgmtVersions );
+  server.on("/management/v1/configureddevices",     HTTP_GET, handleMgmtConfiguredDevices );
+
+  //Additional non-ASCOM custom setup calls
+  server.on("/setup",                               HTTP_GET, handlerSetup ); // Device setup - includes ASCOM api
+  server.on("/api/v1/switch/0/setup",               HTTP_GET, handlerSetup ); //ALPACA device setup - as called by chooser
+  server.on("/setup/v1/switch/0/setup",             HTTP_GET, handlerSetup ); //ALPACA ASCOM service setup - as called by chooser
   server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerSwitchType );
   server.on("/api/v1/switch/0/setswitchtype",       HTTP_PUT, handlerSwitchType );
-  server.on("/setup",                               HTTP_GET, handlerSetup );
-  server.on("/status",                              HTTP_GET, handlerStatus);
-  server.on("/restart",                             HTTP_ANY, handlerRestart);
   server.on("/setup/numswitches" ,                  HTTP_ANY, handlerSetupNumSwitches );
   server.on("/setup/hostname" ,                     HTTP_ANY, handlerSetupHostname );
+  server.on("/setup/location" ,                     HTTP_ANY, handlerSetLocation );
   server.on("/setup/switches",                      HTTP_ANY, handlerSetupSwitches );
+  
+  server.on("/status",                              HTTP_GET, handlerStatus);
+  server.on("/restart",                             HTTP_ANY, handlerRestart);
+
   updater.setup( &server );
   server.begin();
   DEBUGSL1("Web server handlers setup & started");
@@ -289,12 +377,16 @@ void setup()
   ets_timer_setfn( &timer, onTimer, NULL ); 
   ets_timer_setfn( &timeoutTimer, onTimeoutTimer, NULL ); 
   
-  //fire timer every 250 msec
+  //fire timer every 500 msec
   //Set the timer function first
-  ets_timer_arm_new( &timer, 1000, 1/*repeat*/, 1);
+  ets_timer_arm_new( &timer, 500, 1/*repeat*/, 1);
   //ets_timer_arm_new( &timeoutTimer, 2500, 0/*one-shot*/, 1);
   
+  //Show welcome message
   Serial.println( "Setup complete" );
+  
+  //Redirect all serial to telnet - stops blue led flashing in the dark.  
+  Debug.setSerialEnabled(true);
 }
 
 //Timer handler for 'soft' 
@@ -316,42 +408,54 @@ void loop()
   String timestamp;
   String output;
   
-  DynamicJsonBuffer jsonBuffer(256);
-  JsonObject& root = jsonBuffer.createObject();
-
-  if( WiFi.status() != WL_CONNECTED )
-    device.restart(); 
-  
-  int udpBytesIn = Udp.parsePacket();
-  if( udpBytesIn > 0  ) 
-    handleDiscovery( udpBytesIn );
-    
   if( newDataFlag == true ) 
-  {
-    root["time"] = getTimeAsString( timestamp );
-    //Serial.println( getTimeAsString( timestamp ) )
-  
+  {  
+#if defined USE_ADC 
+    if ( adcPresent )
+    {
+      adcReading[0] = adc.readADC_SingleEnded(0); // >12v source
+      debugV("AIN0: %i", adcReading[0] );
+      adcReading[1] = adc.readADC_SingleEnded(1); //5v regulated supply
+      debugV("AIN1: %i", adcReading[1] );      
+      adcReading[2] = adc.readADC_SingleEnded(2); //3.3v regulated supply
+      debugV("AIN2: %i", adcReading[2] );      
+    }
+#endif     
+
     newDataFlag = false;
   }  
 
-  if( client.connected() )
+  if ( client.connected() )
   {
-    if (callbackFlag == true )
+    //Service MQTT keep-alives
+    client.loop();
+
+    if (callbackFlag ) 
     {
       //publish results
+      //publishStuff();
+#if defined USE_ADC
+      publishADC();
+#endif 
       publishHealth();
-      callbackFlag = false;
+      callbackFlag = false; 
     }
-    client.loop();
   }
   else
   {
+    //reconnect();
     reconnectNB();
-    client.subscribe (inTopic);
+    client.subscribe(inTopic);
   }
   
   //Handle web requests
   server.handleClient();
+
+  //Check for Discovery packets
+  //handleManagement();
+
+  //Handle remote telnet debug session
+  Debug.handle();
 }
 
 /* MQTT callback for subscription and topic.
@@ -364,6 +468,67 @@ void callback(char* topic, byte* payload, unsigned int length)
   //set callback flag
   callbackFlag = true;  
 }
+
+#if defined USE_ADC 
+ void publishADC( void )
+ {
+  String outTopic;
+  String output;
+  String timestamp;
+  bool pubState = false;
+  
+  getTimeAsString2( timestamp );
+
+  //publish to our device topic(s)
+  DynamicJsonBuffer jsonBuffer(256);
+  
+  debugI( "Publish ADC entered, adcPresent:  %i", adcPresent );
+  if( adcPresent )
+  {
+    JsonObject& root = jsonBuffer.createObject();
+    output="";//reset
+
+    outTopic = outSenseTopic;
+    outTopic.concat("voltage/");
+    outTopic.concat(myHostname);
+
+    root["sensor"] = "ADS1015";
+    root["time"] = timestamp;
+    root["Raw Voltage"] = adcReading[0] * adcScaleFactor[0] * adcGainFactor[4];   
+
+    root.printTo( output );
+    //Don't miss the 'true' off or it won't publish - Dunno why, yet. 
+    pubState = client.publish( outTopic.c_str(), output.c_str(), true );
+
+    output="";//reset
+    root["sensor"] = "ADS1015";
+    root["time"] = timestamp;
+    root["5v Voltage"] = adcReading[1] * adcScaleFactor[1] * adcGainFactor[4];
+
+    root.printTo( output );
+    //Don't miss the 'true' off or it won't publish - Dunno why, yet. 
+    pubState = client.publish( outTopic.c_str(), output.c_str(), true );
+
+    output="";//reset
+    root["sensor"] = "ADS1015";
+    root["time"] = timestamp;
+    root["3.3v Voltage"] = adcReading[2] * adcScaleFactor[2] * adcGainFactor[4];
+
+    root.printTo( output );
+    //Don't miss the 'true' off or it won't publish - Dunno why, yet. 
+    pubState = client.publish( outTopic.c_str(), output.c_str(), true );
+
+/*
+    if( !pubState)
+      Serial.print( "Failed to publish HTU21D humidity sensor measurement ");    
+    else    
+      Serial.println( "Published HTU21D humidity sensor measurement ");
+    Serial.print( outTopic );Serial.println( output );    
+*/
+  DEBUGS1( outTopic ); DEBUGS1( " published: "); DEBUGSL1( output );
+  }
+ }
+#endif //USE_ADC
 
 /*
  * Had to do a lot of work to get this to work 
@@ -384,8 +549,9 @@ void callback(char* topic, byte* payload, unsigned int length)
   //publish to our device topic(s)
   DynamicJsonBuffer jsonBuffer(256);
   JsonObject& root = jsonBuffer.createObject();
-  root["Time"] = timestamp;
-  root["Message"] = "Listening";
+  root["time"] = timestamp;
+  root["hostname"] = myHostname;
+  root["message"] = "Listening";
   
   root.printTo( output);
   
@@ -395,48 +561,4 @@ void callback(char* topic, byte* payload, unsigned int length)
   client.publish( outTopic.c_str(), output.c_str() );  
   Serial.printf( "topic: %s, published with value %s \n", outTopic.c_str(), output.c_str() );
  }
- 
- void handleDiscovery( int udpBytesCount )
- {
-    char inBytes[64];
-    String message;
-    DiscoveryPacket discoveryPacket;
- 
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    
-    Serial.printf("UDP: %i bytes received from %s:%i\n", udpBytesCount, Udp.remoteIP().toString().c_str(), Udp.remotePort() );
-
-    // We've received a packet, read the data from it
-    Udp.read( inBytes, udpBytesCount); // read the packet into the buffer
-
-    // display the packet contents
-    for (int i = 0; i < udpBytesCount; i++ )
-    {
-      Serial.print( inBytes[i]);
-      if (i % 32 == 0)
-      {
-        Serial.println();
-      }
-      else Serial.print(' ');
-    } // end for
-    Serial.println();
-   
-    //Is it for us ?
-    char protocol[16];
-    strncpy( protocol, (char*) inBytes, 16);
-    if ( strcasecmp( discoveryPacket.protocol, protocol ) == 0 )
-    {
-      Udp.beginPacket( Udp.remoteIP(), Udp.remotePort() );
-      //Respond with discovery message
-      root["IPAddress"] = WiFi.localIP().toString().c_str();
-      root["Type"] = DriverType;
-      root["AlpacaPort"] = 80;
-      root["Name"] = WiFi.hostname();
-      root["UniqueID"] = system_get_chip_id();
-      root.printTo( message );
-      Udp.write( message.c_str(), sizeof( message.c_str() ) * sizeof(char) );
-      Udp.endPacket();   
-    }
- }
- 
+  
