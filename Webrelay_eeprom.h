@@ -28,7 +28,6 @@ void setDefaults( void )
      free ( myHostname );
   myHostname = (char* )calloc( sizeof (char), MAX_NAME_LENGTH );
   strcpy( myHostname, defaultHostname);
-  WiFi.hostname( myHostname );
 
   //MQTT thisID copied from hostname
   if ( thisID != nullptr ) 
@@ -75,7 +74,7 @@ void setDefaults( void )
     switchEntry[i]->value = 0.0F;
   }
 
-//#if defined DEBUG
+#if defined DEBUG_ESP_MH
   //Read them back for checking  - also available via status command.
   Serial.printf( "Switches: %i \n" , numSwitches );
   Serial.printf( "Hostname: %s \n" , myHostname );
@@ -94,7 +93,7 @@ void setDefaults( void )
     Serial.printf( "Value:     %2.2f \n", switchEntry[i]->value );
     Serial.printf( "Writeable: %i \n", switchEntry[i]->writeable );     
   }
-//#endif
+#endif
   DEBUGSL1( "setDefaults: exiting" );
 }
 
@@ -167,7 +166,8 @@ void saveToEeprom( void )
   //Test readback of contents
   String input = "";
   char ch;
-  for ( int i = 0; i < 600 ; i++ )
+  int eepromReadLength = 4 + (numSwitches * MAX_NAME_LENGTH * 3) + (2* sizeof(int) )  + ( numSwitches * ( sizeof(SwitchEntry) + (2*MAX_NAME_LENGTH) ) ) + 10;
+  for ( int i = 0; i < eepromReadLength ; i++ )
   {
     ch = (char) EEPROM.read( i );
     if ( ch == '\0' )

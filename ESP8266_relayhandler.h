@@ -38,19 +38,49 @@ Internally this code keeps the state of the switch in the switchEntry structure 
 #include "AlpacaErrorConsts.h"
 #include "ASCOMAPISwitch_rest.h"
 
-
 //Function definitions
 void copySwitch( SwitchEntry* sourceSe, SwitchEntry* targetSe );
 void initSwitch( SwitchEntry* targetSe );
 SwitchEntry** reSize( SwitchEntry** old, int newSize );
 bool getUriField( char* inString, int searchIndex, String& outRef );
-String& setupFormBuilder( String& htmlForm, String& errMsg );
 
-void handlerMaxswitch(void);
-void handlerCanWrite(void);
-void handlerSwitchState(void);
-void handlerSwitchDescription(void);
-void handlerSwitchName(void);
+//Deprecated in favour of splitting up in to separate chunks. 
+//String& setupFormBuilder( String& htmlForm, String& errMsg );
+
+String& setupFormBuilderHeader( String& htmlForm );
+String& setupFormBuilderDeviceHeader( String& htmlForm, String& errMsg ); //For device setup
+String& setupFormBuilderDeviceStrings( String& htmlForm );
+String& setupFormBuilderDriverHeader( String& htmlForm, String& errMsg ); //For per-driver setup when we have 1 or more drivers attached
+String& setupFormBuilderDriver0Switches( String& htmlForm, int index );
+String& setupFormBuilderFooter( String& htmlForm );
+
+//Device settings
+void sendDeviceSetup( int returnCode, String& message, String& err );
+void handlerDeviceSetup(void);
+void handlerDeviceHostname(void);
+void handlerDeviceLocation(void);
+void handlerDeviceUdpPort(void);
+
+//Driver0 settings
+void sendDriver0Setup( int returnCode, String& message, String& err );
+void handlerDriver0Setup(void);
+void handlerDriver0SetupNumSwitches(void);
+void handlerDriver0Maxswitch(void);
+void handlerDriver0CanWrite(void);
+void handlerDriver0SwitchState(void);
+void handlerDriver0SwitchDescription(void);
+void handlerDriver0SwitchName(void);
+void handlerDriver0SwitchType(void);
+void handlerDriver0SwitchValue(void);
+void handlerDriver0MinSwitchValue(void);
+void handlerDriver0MaxSwitchValue(void);
+void handlerDriver0SwitchStep(void);
+void handlerDriver0SetupSwitches(void);
+
+void handlerNotFound();
+void handlerRestart();
+void handlerNotImplemented();
+void handlerStatus(void);
 
 /*
  * This function will write a copy of the provided deviceEntry structure into the internal memory array. 
@@ -166,7 +196,7 @@ bool getUriField( char* inString, int searchIndex, String& outRef )
 
 //GET ​/switch​/{device_number}​/maxswitch
 //The number of switch devices managed by this driver
-void handlerMaxswitch(void)
+void handlerDriver0Maxswitch(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -184,7 +214,7 @@ void handlerMaxswitch(void)
 
 //GET ​/switch​/{device_number}​/canwrite
 //Indicates whether the specified switch device can be written to
-void handlerCanWrite(void)
+void handlerDriver0CanWrite(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -226,7 +256,7 @@ void handlerCanWrite(void)
 //GET ​/switch​/{device_number}​/getswitch
 //PUT ​/switch​/{device_number}​/setswitch
 //Get/Set the state of switch device id as a boolean - treats as binary
-void handlerSwitchState(void)
+void handlerDriver0SwitchState(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -272,6 +302,11 @@ void handlerSwitchState(void)
             returnCode = 200;
             break;
           case SWITCH_PWM:
+            switchValue = switchEntry[switchID]->value;
+            bValue = false;
+            root["Value"] =  switchValue;  
+            returnCode = 200;
+            break;          
           case SWITCH_ANALG_DAC:
           default:
             returnCode = 400;
@@ -299,6 +334,12 @@ void handlerSwitchState(void)
               returnCode = 200;              
             break;
           case SWITCH_PWM:
+              DEBUGSL1( "Found PWM to set");
+              switchValue = server.arg( argToSearchFor[1] ).toInt();
+              switchEntry[switchID]->value = switchValue;
+              returnCode = 200;              
+            break;
+          
           case SWITCH_ANALG_DAC:
           default:
             returnCode = 400;
@@ -333,7 +374,7 @@ void handlerSwitchState(void)
 
 //GET ​/switch​/{device_number}​/getswitchdescription
 //Gets the description of the specified switch device
-void handlerSwitchDescription(void)
+void handlerDriver0SwitchDescription(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -373,7 +414,7 @@ void handlerSwitchDescription(void)
 //GET ​/switch​/{device_number}​/getswitchname
 //PUT ​/switch​/{device_number}​/setswitchname
 //Get/set the name of the specified switch device
-void handlerSwitchName(void)
+void handlerDriver0SwitchName(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -446,7 +487,7 @@ void handlerSwitchName(void)
 //GET ​/switch​/{device_number}​/getswitchtype
 //PUT ​/switch​/{device_number}​/setswitchtype
 //Get/set the name of the specified switch device
-void handlerSwitchType(void)
+void handlerDriver0SwitchType(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -486,13 +527,26 @@ void handlerSwitchType(void)
           {
           case SWITCH_RELAY_NO:
           case SWITCH_RELAY_NC:
-          case SWITCH_ANALG_DAC:
-          case SWITCH_PWM:
               switchEntry[switchID]->type = (enum SwitchType) newType;
+              switchEntry[switchID]->min =  MINVAL;
+              switchEntry[switchID]->max =  MAXBINARYVAL;
+              switchEntry[switchID]->step = MAXBINARYVAL;
+              break;
+         
+          case SWITCH_PWM:
+              //Default frequency is 1000Hz
+              switchEntry[switchID]->type = (enum SwitchType) newType;
+              switchEntry[switchID]->min = (float) MINVAL;
+              switchEntry[switchID]->max = (float) MAXDIGITALVAL; 
+              switchEntry[switchID]->step = 1.0F;
+              switchEntry[switchID]->value = switchEntry[switchID]->min;
+              analogWriteRange ( 1024);
+              analogWrite( switchEntry[switchID]->pin, switchEntry[switchID]->value );              
               returnCode = 200;
               break;
+          case SWITCH_ANALG_DAC:                        
           default:
-              root["ErrorMessage"]= "Invalid switch type not found ";
+              root["ErrorMessage"]= "Invalid switch type not found or implemented";
               root["ErrorNumber"] = invalidValue ;
               returnCode = 400;
               break;
@@ -519,7 +573,7 @@ void handlerSwitchType(void)
 //GET ​/switch​/{device_number}​/getswitchvalue
 //PUT ​/switch​/{device_number}​/setswitchvalue
 //Get/Set the value of the specified switch device as a double - ie not a binary setting
-void handlerSwitchValue(void)
+void handlerDriver0SwitchValue(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -554,14 +608,10 @@ void handlerSwitchValue(void)
           switch( switchEntry[switchID]->type )
           {
             case SWITCH_PWM: 
-                  //analogWrite( switchEntry[i]->pin, output );
                   root["Value"] = switchEntry[switchID]->value;
                   break;
             case SWITCH_ANALG_DAC:
-                  //e.g. analogue_write( 256, 15);
-            //Not supported yet - need to be able to add pin mapping to this & requires
-            //More pins than a simple ESP8266 & PCF8574A combo
-                    root["Value"] = switchEntry[switchID]->value;
+                  root["Value"] = switchEntry[switchID]->value;
                   returnCode = 200;
                   break;                
             case SWITCH_RELAY_NO:
@@ -576,7 +626,7 @@ void handlerSwitchValue(void)
         }
         else if( server.method() == HTTP_PUT && hasArgIC( argToSearchFor[1], server, false ) )
         {
-          value = (float) server.arg( argToSearchFor[1] ).toDouble();
+          value = (float) server.arg( argToSearchFor[1] ).toFloat();
           switch( switchEntry[switchID]->type ) 
           {
             case SWITCH_PWM: 
@@ -589,7 +639,7 @@ void handlerSwitchValue(void)
                   }
                   else
                   {
-                    root["ErrorMessage"] = "Digital write out of range for switch";
+                    root["ErrorMessage"] = "Digital write out of range for switch in PWM mode";
                     root["ErrorNumber"] = invalidOperation ;
                     returnCode = 200;
                   }                  
@@ -606,7 +656,7 @@ void handlerSwitchValue(void)
                        value <= switchEntry[switchID]->max )
                   {
                     switchEntry[switchID]->value = value;
-                    //e.g. analogue_write( switchEntry[switchID]->pin, switchEntry[switchID]->pin );
+                    //e.g. analogue_write( switchEntry[switchID]->value, switchEntry[switchID]->pin );
                     root["ErrorMessage"] = "DAC Not implemented yet - Invalid digital operation for switch";
                     root["ErrorNumber"] = invalidOperation ;
                   }
@@ -631,13 +681,13 @@ void handlerSwitchValue(void)
     }            
     
     root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    server.send(returnCode, F("application/json"), message);
     return;
 }
-
+  
 //GET ​/switch​/{device_number}​/minswitchvalue
 //Gets the minimum value of the specified switch device as a double
-void handlerMinSwitchValue(void)
+void handlerDriver0MinSwitchValue(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -671,13 +721,13 @@ void handlerMinSwitchValue(void)
       returnCode = 400;
     }
     root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    server.send(returnCode, F("application/json"), message);
     return;
 }
 
 //GET ​/switch​/{device_number}​/maxswitchvalue
 //Gets the maximum value of the specified switch device as a double
-void handlerMaxSwitchValue(void)
+void handlerDriver0MaxSwitchValue(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -712,13 +762,13 @@ void handlerMaxSwitchValue(void)
        returnCode = 400;
     }
     root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    server.send(returnCode, F("application/json"), message);
     return;
 }
 
 //GET ​/switch​/{device_number}​/switchstep
 //Returns the step size that this device supports (the difference between successive values of the device).
-void handlerSwitchStep(void)
+void handlerDriver0SwitchStep(void)
 {
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -753,7 +803,7 @@ void handlerSwitchStep(void)
        returnCode = 400;    
     }
     root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    server.send(returnCode, F("application/json"), message);
     return;
 }
 
@@ -771,17 +821,18 @@ void handlerNotFound()
   jsonResponseBuilder( root, clientID, transID, serverTransID++, "HandlerNotFound", invalidOperation , "No REST handler found for argument - check ASCOM Switch v2 specification" );    
   root["Value"] = 0;
   root.printTo(message);
-  server.send(responseCode, "application/json", message);
+  server.send(responseCode, F("application/json"), message);
 }
 
 void handlerRestart()
 {
   String message;
   int responseCode = 200;
-  message.concat( "restarting on user request" );
-  server.send(responseCode, "text/plain", message);
+  server.sendHeader( WiFi.hostname().c_str(), String("/status"), true);
+  server.send ( 302, F("text/html"), "<!Doctype html><html>Redirecting for restart</html>");
+  DEBUGSL1(F("Reboot requested") );
   device.restart();
-}
+ }
 
 void handlerNotImplemented()
 {
@@ -795,7 +846,7 @@ void handlerNotImplemented()
   jsonResponseBuilder( root, clientID, transID, serverTransID++, "HandlerNotFound", notImplemented  , "No REST handler implemented for argument - check ASCOM Dome v2 specification" );    
   root["Value"] = 0;
   root.printTo(message);
-  server.send(responseCode, "application/json", message);
+  server.send(responseCode, F("application/json"), message);
 }
 
 //GET ​/switch​/{device_number}​/status
@@ -815,9 +866,9 @@ void handlerStatus(void)
     
     root["time"] = getTimeAsString( timeString );
     root["host"] = myHostname;
+    root["build version"]         = String(__DATE__) + FPSTR(BuildVersionName);
     root["connected"] = (connected)?"true":"false";
     root["clientId"] = connectedClient;
-
     
     for( i = 0; i < numSwitches; i++ )
     {
@@ -843,16 +894,38 @@ void handlerStatus(void)
     Serial.println( message);
     
     root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    server.send(returnCode, F("application/json"), message);
     return;
 }
 
+//Helper function
+void sendDeviceSetup( int returnCode, String& message, String& err )
+ {
+    //Send large pages in chunks
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    setupFormBuilderHeader( message );      
+    server.send( returnCode, F("text/html"), message );
+    message = "";
+
+    setupFormBuilderDeviceHeader( message, err );      
+    server.sendContent( message );
+    message = "";
+    
+    setupFormBuilderDeviceStrings( message );      
+    server.sendContent( message );
+    message = "";    
+    
+    setupFormBuilderFooter( message );
+    server.sendContent( message );
+ }
+
 /*
  * Handlers to do custom setup that can't be done without a windows ascom driver setup form. 
+ * Returns device page 
  */
- void handlerSetup(void)
+ void handlerDeviceSetup( ) 
  {
-   String message, timeString, err= "";
+   String timeString, message, err;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
     uint32_t switchID = -1;
@@ -860,22 +933,15 @@ void handlerStatus(void)
     int returnCode = 200;
     if ( server.method() == HTTP_GET )
     {
-        message = setupFormBuilder( message, err );      
-        server.send( returnCode, "text/html", message ); 
-    }
-    else
-    {
-        message = "<!DOCTYPE html> <html><body><p> Use <a href=\"http://";
-        message.concat( myHostname );
-        message.concat( "/setup\"> to configure </a> the switch for use</p></body></html>");
-        server.send( 400, "text/html", message ); 
+        sendDeviceSetup( returnCode, message, err );
     }
  }
- 
+
+  
  /*
   * Handler to update the hostname from the form.
   */
- void handlerSetupHostname(void) 
+ void handlerDeviceHostname(void) 
  {
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -883,7 +949,7 @@ void handlerStatus(void)
     uint32_t switchID = -1;
     
     int returnCode = 400;
-    String argToSearchFor[] = { "hostname", "numSwitches"};
+    String argToSearchFor[] = { "hostname" };
      
     if ( server.method() == HTTP_POST || server.method() == HTTP_PUT || server.method() == HTTP_GET)
     {
@@ -895,31 +961,34 @@ void handlerStatus(void)
           {
             //process new hostname
             strncpy( myHostname, newHostname.c_str(), MAX_NAME_LENGTH );
+            saveToEeprom();
+            returnCode = 200;
           }
           else
+          {
              err = "New name too long";
-
-          message = setupFormBuilder( message, err );      
-          returnCode = 200;    
-          saveToEeprom();
-          server.send(returnCode, "text/html", message);
-          device.reset();
+          }          
         }
     }
     else
     {
-      returnCode=400;
       err = "Bad HTTP request verb";
-      message = setupFormBuilder( message, err );      
     }
-    server.send(returnCode, "text/html", message);
-    return;
+    
+    sendDeviceSetup( returnCode, message, err );    
+
+    if( returnCode == 200 ) 
+    {              
+      //Now reset to change the hostname and re-register DHCP
+      device.reset();
+    }
+ return;
  }
 
 /*
-  * Handler to update the hostname from the form.
+  * Handler to update the device Location from the form.
   */
- void handlerSetLocation(void) 
+ void handlerDeviceLocation(void) 
  {
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -939,30 +1008,113 @@ void handlerStatus(void)
           {
             //process new hostname
             strncpy( Location, newLocation.c_str(), MAX_NAME_LENGTH );
+            saveToEeprom();
+            returnCode = 200;    
           }
           else
+          {
              err = "Location details too long";
+          }
+        }
+    }
+    else
+    {
+      err = "Bad HTTP request verb";
+    }
 
-          message = setupFormBuilder( message, err );      
-          returnCode = 200;    
-          saveToEeprom();
-          server.send(returnCode, "text/html", message);
+    sendDeviceSetup( returnCode, message, err );
+    return;    
+ }
+
+void handlerDeviceUdpPort(void) 
+ {
+    String message, timeString, err = "";
+    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
+    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
+    uint32_t switchID = -1;    
+   
+    int returnCode = 400;
+    String argToSearchFor[] = { "discoveryport"};
+     
+    if ( server.method() == HTTP_POST || server.method() == HTTP_PUT || server.method() == HTTP_GET)
+    {
+        if( hasArgIC( argToSearchFor[0], server, false )  )
+        {
+          int newPort = server.arg(argToSearchFor[0]).toInt() ;
+          //process form variables.
+          if( newPort > 1024 && newPort < 65536  )
+          {
+            //process new hostname
+            udpPort = newPort;
+            saveToEeprom();
+            returnCode = 200;
+          }
+          else
+          {
+            err = "New Discovery port value out of range ";
+            returnCode = 401;
+          }
         }
     }
     else
     {
       returnCode=400;
       err = "Bad HTTP request verb";
-      message = setupFormBuilder( message, err );      
     }
-    server.send(returnCode, "text/html", message);
-    return;    
+    
+    //Send large pages in chunks
+    sendDeviceSetup( returnCode, message, err );
+ }
+
+//helper function
+void sendDriver0Setup( int returnCode, String& message, String& err )
+{
+  //Send large pages in chunks
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  setupFormBuilderHeader( message );      
+  server.send( returnCode, "text/html", message );
+  message = "";
+  
+  setupFormBuilderDriverHeader( message, err );
+  server.sendContent( message );
+  message = "";
+  
+  //List the switches
+  for ( int i=0; i< numSwitches; i++ )
+  {
+    setupFormBuilderDriver0Switches( message, i ); 
+    server.sendContent( message );
+    message = "";
+  }
+
+  setupFormBuilderFooter( message );
+  server.sendContent( message );
+  message = "";
+}
+
+/*
+ * Handlers to do custom setup that can't be done without a windows ascom driver setup form. 
+ * Returns driver page for a specific Alpaca driver type, 
+ * TODO might want to think about how to handle multiple drivers 
+ */
+ void handlerDriver0Setup(void)
+ {
+   String message, timeString, err= "";
+    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
+    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
+    uint32_t switchID = -1;
+    
+    int returnCode = 200;
+    if ( server.method() == HTTP_GET )
+    {
+        sendDriver0Setup( returnCode, message, err );
+    }
  }
 
  /*
   * Handle update of the number of attached switches
   */
- void handlerSetupNumSwitches(void) 
+ void handlerDriver0SetupNumSwitches(void) 
  {
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
@@ -981,7 +1133,6 @@ void handlerStatus(void)
           if( newNumSwitches == 0 || newNumSwitches > MAXSWITCH )
           {
             err = "Switch size exceeds device range or is zero.";
-            returnCode = 400;
           }
           else
           {
@@ -991,17 +1142,14 @@ void handlerStatus(void)
             saveToEeprom();
             returnCode = 200;              
           }
-
-          message = setupFormBuilder( message, err );  
-          server.send( returnCode, "text/html", message);
         }        
     }
     else
     {
       err = "Bad HTTP request verb";
-      message = setupFormBuilder( message, err );      
     }
-    server.send(returnCode, "text/html", message);
+
+    sendDriver0Setup( returnCode, message, err );
     return;
  }
 
@@ -1009,16 +1157,15 @@ void handlerStatus(void)
   * lengthy function to take the setup form output for each switch to manage its control parameters.
   * We don't attempt to set its value here. We just set the type, limits, features etc. The main API controls its use.
   */
- void handlerSetupSwitches(void) 
+ void handlerDriver0SetupSwitches(void) 
  {
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
     int i;
-    int returnCode = 200;
+    int returnCode = 400;
     String argToSearchFor[9] = { "switchId", "name", "description", "type", "writeable", "pin", "min", "max", "step" };
     
-    DEBUGS1("Entered handlerSetupSwitches");
     if ( server.method() == HTTP_POST || server.method() == HTTP_PUT || server.method() == HTTP_GET )
     {
       //Expecting an array of variables in form submission
@@ -1036,7 +1183,7 @@ void handlerStatus(void)
         
         //Get the id of the current switch to be updated 
         id = (int) server.arg( argToSearchFor[0] ).toInt();
-        DEBUGS1("handlerSwitchSetup - found switchId ");DEBUGSL1( id );
+        debugV( "found switchId %d\n", id );
         
         //Check for all args present 
         int i=1;
@@ -1044,14 +1191,14 @@ void handlerStatus(void)
         for ( i=1; i < 9; i++ ) 
         {
           arg = argToSearchFor[i] + id;
-          DEBUGS1("handlerSwitchSetup - arg sought: ");DEBUGSL1(arg.c_str());
+          debugV( "arg sought: %s\n", arg.c_str() );
 
           if( hasArgIC( arg, server, false )  )
           {
-            DEBUGS1("handlerSwitchSetup - arg found ");DEBUGSL1(arg.c_str());
-            DEBUGS1("handlerSwitchSetup - foundCount ");DEBUGSL1(foundCount);
-            allFound &= true;
+            debugV( "arg found: %s \n", arg.c_str() );
+            allFound |= true;
             foundCount ++;
+            debugW( "foundCount %d \n", foundCount);            
           }  
           else 
           {
@@ -1063,14 +1210,15 @@ void handlerStatus(void)
         if( !allFound && foundCount == 4 ) 
         {
           enum SwitchType localType = (enum SwitchType) server.arg( argToSearchFor[3] + id ).toInt();
-          DEBUGS1( "handlerSwitchSetup: looking for type: ");DEBUGSL1( localType );
+          debugV( "looking for type - found: %d\n", localType );
           
           if ( ( localType == SWITCH_RELAY_NC ) || ( localType == SWITCH_RELAY_NO ) )
           {
-            DEBUGSL1( "handlerSwitchSetup: found analogue switch type - only expecting 4 variables");
-            //Actually we're all good - the disable form variables are not passed when disabled.
+            debugW( "%s", "found analogue switch type AND expecting 4 variables");
+            //We're all good - the disabled form variables are not passed when disabled.
             //That means we only see 4 rather than all 8 of them.                
             allFound = true;
+            returnCode = 200;
             //Cache the existing values so they don't get overwritten with defaults. 
             min = switchEntry[id]->min;
             max = switchEntry[id]->max;
@@ -1079,19 +1227,28 @@ void handlerStatus(void)
           }
           else
           {
-            DEBUGSL1( "handlerSwitchSetup: type not found for analogue switch type - can't validate the fewer variables found");
+             debugW( "%s\n", "type not found for analogue switch type - can't validate the 4 form variables found");
+             err = "Incorrect switch type for number of variables supplied. Expecting id, name, description, type, writeable";
+             returnCode = 0x402;
           }
         }
         else if ( !allFound && foundCount != 4 ) 
         {
-          DEBUGS1("handlerSwitchSetup - not all args found - failed at ");DEBUGSL1( i );
+          debugW( "not all args found - failed at %d", i );
           err = "Not all form variables supplied";
           returnCode = 0x402; //check
+        }
+        else
+        {
+          debugD( "All 8 args found - processing " );
+          returnCode = 200;;//all found OK 
+          err = "";
         }
   
         //Get the values and sense-check
         //Switch name
-        DEBUGSL1("handlerSwitchSetup - all args found - checking values ");
+        debugV( "%s\n", "all args found - checking values ");
+
         arg = argToSearchFor[1] + id;
         if( hasArgIC( arg, server, false ) && returnCode == 200 )
         {
@@ -1100,11 +1257,13 @@ void handlerStatus(void)
           {
             err = "Name longer than max allowed ";//Should be prevented by form controls.
             returnCode = 0x401;
-            DEBUGSL1("handlerSwitchSetup - switch name field not successfully parsed");            
+            debugW( "%s\n", "switch name field not successfully parsed");            
           }
+          else
+            debugV( "Valid name field found : %s\n", name.c_str() );         
         }
           
-        //Switch description
+        //Switch description        
         arg = argToSearchFor[2] + id;
         if( hasArgIC( arg, server, false ) && returnCode == 200 )
         {
@@ -1113,58 +1272,49 @@ void handlerStatus(void)
           {
             err = "Description longer than max allowed ";//Should be prevented by form controls.
             returnCode = 0x403;
-            DEBUGSL1("handlerSwitchSetup - switch description field not successfully parsed");            
+            debugW( "%s\n", "switch description field not successfully parsed");            
           }
+          else
+            debugV( "Valid description field found : %s\n", description.c_str() );                   
         }
   
         //Switch type
         arg = argToSearchFor[3] + id;
         if( hasArgIC( arg, server, false ) && returnCode == 200 )
         {
-          String typeAsString = server.arg( arg );
           bool found = false;
-          DEBUGS1("handlerSwitchSetup - switch type field found :");DEBUGSL1( typeAsString  );
           type = SWITCH_NOT_SELECTED;
-          for ( int j=0; j < 5 && !found; j++ )
+
+          int typeAsInt = server.arg( arg ).toInt();
+          debugD( "switch type field found :%d\n", typeAsInt );
+          
+          if( typeAsInt >= 0 && typeAsInt < switchTypesLen )
           {
-            if ( switchTypes[j].compareTo( typeAsString ) == 0 )
-            {
               found = true;              
-              type = (enum SwitchType) j;
-              DEBUGS1("handlerSwitchSetup - switch type field matched :");DEBUGSL1( type  );
-            }
+              type = (enum SwitchType) typeAsInt;
+              debugV( "switch type field matched :%d\n", type );
           }
-          if ( !found )
+          else 
           {
-            DEBUGSL1("handlerSwitchSetup - switch type field NOT understood");
+            debugW( "switch type field no valid value found (%d)\n", type );
             returnCode = 0x403;
             ;//
-          }
-          
-          if ( !( type == SWITCH_RELAY_NC || 
-                  type == SWITCH_RELAY_NO || 
-                  type == SWITCH_PWM || 
-                  type == SWITCH_ANALG_DAC ) ) 
-          {
-            err = "Type not yet supported";//Should be prevented by form controls.
-            returnCode = 0x400;
-            DEBUGSL1("handlerSwitchSetup - switch type field not successfully parsed");
           }
         }
         
         //Switch writeable
         arg = argToSearchFor[4] + id;
+        //If writeable is not checked, chrome doesn't send it as a form variable - hence its missing. 
+        //So we have to assume its false if missing. 
+        //Solved by replacing a checkbox with a pre-checked radio  
+        writeable = false;
         if( hasArgIC( arg, server, false ) && returnCode == 200 )
         {
           writeable = (bool) server.arg( arg ).equalsIgnoreCase( "on" );
-          DEBUGS1("handlerSwitchSetup - writeable value found:");DEBUGSL1( writeable );
+          debugW( "%s", "handlerSwitchSetup - writeable value found:");DEBUGSL1( writeable );
         }
-        //If writeable is not checked, chrome doesn't send it as a form variable - hence its missing. 
-        //So we have to assume its false if missing. Solved by replacing a checkbox with a pre-checked radio  
-        else 
-          writeable = false;
         
-        if( foundCount == 4 && allFound ) 
+        if( foundCount > 4 && allFound ) 
         {
           //Switch pin
           arg = argToSearchFor[5] + id;
@@ -1173,20 +1323,42 @@ void handlerStatus(void)
             pin = (int) server.arg( arg ).toInt();
             if( type == SWITCH_PWM || type == SWITCH_ANALG_DAC )
             {
-              if ( ( pin != NULLPIN ) && !( pin >= MINPIN && pin <= MAXPIN ) )
+              //? in valid pin range ? 
+              if ( ( pin != NULLPIN ) && ( pin >= MINPIN ) && ( pin <= MAXPIN ) )
+              {
+                int pinValid = false;
+                int index = 0;
+                
+                debugD( "switch pin field found :%d\n", pin );
+
+                //? already in use - means previous users need to be set to NULLPIN first. 
+                while ( !pinValid && pinMap[index] != NULLPIN )
+                {
+                  pinValid = ( pin == pinMap[index] );
+                  index++;
+                }
+                if ( !pinValid ) 
+                {
+                  pin = NULLPIN;
+                  err = "PWM Pin value in range but already in use";//Not prevented by form controls.
+                  returnCode = 0x403;
+                  debugW( "%s\n", "switch pin value not in valid range");
+                }
+              }
+              else 
               {
                 err = "Digital Pin value not in range";//Should be prevented by form controls.
                 returnCode = 0x403;
-                DEBUGSL1("handlerSwitchSetup - switch pin field not successfully parsed");
+                debugW( "%s\n", "switch pin value not in valid range");
               }
             }
-            else 
+            else //other switch types - Should be prevented by form controls.
             {
               if ( pin != NULLPIN ) 
               {
-                err = "Binary switches don't have non-null pin numbers";//Should be prevented by form controls.
+                err = "Binary switches don't have non-null pin numbers";
                 returnCode = 0x403;
-                DEBUGSL1("handlerSwitchSetup - switch pin field should be NULLPIN");              
+                debugW( "%s", "switch pin field should be NULLPIN");              
               }
             }
           }
@@ -1195,39 +1367,39 @@ void handlerStatus(void)
           arg = argToSearchFor[6] + id;
           if( hasArgIC( arg, server, false ) && returnCode == 200  )
           {
-            min = server.arg( arg ).toDouble();            
+            min = server.arg( arg ).toFloat();            
             if( type == SWITCH_PWM || type == SWITCH_ANALG_DAC )
             {
               if ( ( min < MINVAL ) || ( min > MAXDIGITALVAL ) ) 
               {
                 err = "Min value out of digital range";//Should be prevented by form controls.
                 returnCode = 0x400;
-                DEBUGSL1("handlerSwitchSetup - switch max field not successfully parsed OOR for type");
+                debugW( "%s", "switch max field not successfully parsed OOR for type");
               }
             }
-            else //Binary switches 
+            else //Binary switches  - Should be prevented by form controls
             {
               if( ( min < MINVAL ) || ( min > MAXBINARYVAL ) ) 
               {
-                  err = "Min value out of binary/analogue range";//Should be prevented by form controls.
+                  err = "Min value out of binary/analogue range";
                   returnCode = 0x400;
-                  DEBUGSL1("handlerSwitchSetup - switch min field not in range");                
+                  debugW( "%s", "switch min field not in range");                
               }
             }
           }
     
-          //Switch max
+          //Switch max - Should be prevented by form controls.
           arg = argToSearchFor[7] + id;
           if( hasArgIC( arg, server, false ) && returnCode == 200 )
           {
-            max = (float) server.arg( arg ).toDouble();
+            max = (float) server.arg( arg ).toFloat();
             if( type == SWITCH_PWM || type == SWITCH_ANALG_DAC )
             {
               if ( ( max < MINVAL ) || ( max > MAXDIGITALVAL ) ) 
               {
-                err = "Max value out of digital range";//Should be prevented by form controls.
+                err = "Max value out of digital range";
                 returnCode = 0x400;
-                DEBUGSL1("handlerSwitchSetup - switch max field not in digital range");              
+                debugW( "%s", "switch max field not in digital range");              
               }
             }
             else 
@@ -1236,7 +1408,7 @@ void handlerStatus(void)
               {
                   err = "Max value out of binary/analogue range";//Should be prevented by form controls.
                   returnCode = 0x400;
-                  DEBUGSL1("handlerSwitchSetup - switch max field not in analogue range");                            
+                  debugW( "%s\n", "switch max field not in analogue range");                            
               }
             }
           }
@@ -1245,14 +1417,14 @@ void handlerStatus(void)
           arg = argToSearchFor[8] + id;
           if( hasArgIC( arg, server, false ) && returnCode == 200 )
           {
-            step = (float) server.arg( arg ).toDouble();
+            step = (float) server.arg( arg ).toFloat();
             if( type == SWITCH_PWM || type == SWITCH_ANALG_DAC )
             {
               if ( step < MINVAL || step > MAXDIGITALVAL ) 
               {
                 err = "Max step value out of digital range";//Should be prevented by form controls.
                 returnCode = 0x400;
-                DEBUGSL1("handlerSwitchSetup - switch step field not in digital range");                            
+                debugW( "%s\n", "switch step field not in digital range");                            
               }
             }
             else 
@@ -1261,11 +1433,13 @@ void handlerStatus(void)
               {
                   err = "Step value out of binary/analogue range";//Should be prevented by form controls.
                   returnCode = 0x400;
-                  DEBUGSL1("handlerSwitchSetup - switch step field not in analogue range");                              
+                  debugW( "%s\n", "handlerSwitchSetup - switch step field not in analogue range");                              
               }
             }            
           }
         }//end of exclusion for disabled fields based on switch types. 
+        else
+            debugW( "%s\n", "switch step not enough fields > 4 but less than 7 ");                                      
 
       /*
       Apply some logic to the combinations of values to check for errors
@@ -1274,13 +1448,11 @@ void handlerStatus(void)
       */
         if ( returnCode == 200 )
         {
-          DEBUGSL1("handlerSwitchSetup - named fields found and parsed OK");
-
           if ( ( min > max ) )
           {
             returnCode = 0x402;
             err = "Bad values : check min <= max ";              
-            DEBUGSL1("handlerSwitchSetup - switch min/max/step field not in range");              
+            debugW("%s", "switch min/max/step field not in range");              
           }
           else //Save the values found - they look OK otherwise
           {
@@ -1290,11 +1462,26 @@ void handlerStatus(void)
             switchEntry[id]->max = max;
             switchEntry[id]->min = min;
             switchEntry[id]->step = step;
-            switchEntry[id]->type = (enum SwitchType ) type;
             switchEntry[id]->pin = pin;
             switchEntry[id]->writeable = writeable;
             //Update current value to fall within new range 
             switchEntry[id]->value = switchEntry[id]->min;
+            
+            //Has the switch type changed for this switch ? 
+            if( switchEntry[id]->type != SWITCH_PWM && type == SWITCH_PWM ) 
+            {
+              switchEntry[id]->type = (enum SwitchType ) type; 
+              analogWrite( pin, min );
+            }
+            //Are we re-setting the existing PWM mode pin
+            else if ( switchEntry[id]->type == SWITCH_PWM && type == SWITCH_PWM )
+            {
+              analogWrite( pin, 0 );
+            }
+            //Or something else 
+            else 
+              analogWrite( pin, 0 );
+            
             //Save the new setup
             saveToEeprom();
             returnCode = 200;
@@ -1304,7 +1491,7 @@ void handlerStatus(void)
       else
       {
         err = "Switch Id ('switchId') missing ";
-        returnCode = 401; //check
+        returnCode = 400; //check    
       }                         
     }//End of GET/POST/PUT
     else //Not an acceptable HTML verb
@@ -1313,11 +1500,7 @@ void handlerStatus(void)
       returnCode = 403; //check    
     }
 
-    DEBUGSL1("handlerSwitchSetup - leaving ");
-
-    //Finally - respond. 
-    message = setupFormBuilder( message, err );      
-    server.send(returnCode, "text/html", message);
+    sendDriver0Setup( returnCode, message, err );
     return;  
  }
 /*
@@ -1328,82 +1511,49 @@ void handlerStatus(void)
  Bear in mind HTML standard doesn't support use of PUT in forms and changes it to GET so arguments get sent in plain sight as 
  part of the URL.
  */
-String& setupFormBuilder( String& htmlForm, String& errMsg )
+ /*   https://github.com/esp8266/Arduino/issues/3205
+  *   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+      server.send ( 200, "text/html", first_part.c_str());
+      while (...) 
+      {
+          resp = "...";
+          resp += "...";
+          server.sendContent(resp);
+      }
+  */
+
+String& setupFormBuilderHeader( String& htmlForm )
 {
   String hostname = WiFi.hostname();
-  
-/*
-<!DocType html>
-<html lang=en >
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
-<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
-<script>function setTypes( a ) {   var searchFor = "types"+a;  var x = document.getElementById(searchFor).value;  if( x.indexOf( "PWM" ) > 0 || x.indexOf( "DAC" ) > 0 )  {      document.getElementById("pin"+a).disabled = false;      document.getElementById("min"+a).disabled = false;      document.getElementById("max"+a).disabled = false;      document.getElementById("step"+a).disabled = false;  }  else  {      document.getElementById("pin"+a).disabled = true;      document.getElementById("min"+a).disabled = true;      document.getElementById("max"+a).disabled = true;      document.getElementById("step"+a).disabled = true;  }}</script>
-</meta>
-<style>
-legend { font: 10pt;}
-h1 { margin-top: 0; }
-form {
-    margin: 0 auto;
-    width: 500px;
-    padding: 1em;
-    border: 1px solid #CCC;
-    border-radius: 1em;
-}
-div+div { margin-top: 1em; }
-label span {
-    display: inline-block;
-    width: 150px;
-    text-align: right;
-}
-input, textarea {
-    font: 1em sans-serif;
-    width: 150px;
-    box-sizing: border-box;
-    border: 1px solid #999;
-}
-input[type=checkbox], input[type=radio], input[type=submit] {
-    width: auto;
-    border: none;
-}
-input:focus, textarea:focus { border-color: #000; }
-textarea {
-    vertical-align: top;
-    height: 5em;
-    resize: vertical;
-}
-fieldset {
-    width: 410px;
-    box-sizing: border-box;
-    border: 1px solid #999;
-}
-button { margin: 20px 0 0 124px; }
-label {  position: relative; }
-label em {
-  position: absolute;
-  right: 5px;
-  top: 20px;
-}
-</style>
-</head>
-*/
- 
+
   htmlForm = "<!DocType html><html lang=en ><head><meta charset=\"utf-8\">";
   htmlForm += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
   htmlForm += "<link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css\">";
   htmlForm += "<script src=\"https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js\"></script>";
   htmlForm += "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js\"></script>";
   htmlForm += "<script src=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js\"></script>";
-  
+
+  htmlForm += "<style>\
+legend { font: 10pt;}\
+h1 { margin-top: 0; }\
+form { margin: 0 auto; width: 500px;padding: 1em;border: 1px solid #CCC;border-radius: 1em;}\
+div+div { margin-top: 1em; }\
+label span{display: inline-block;width: 150px;text-align: right;}\
+input, textarea {font: 1em sans-serif;width: 150px;box-sizing: border-box;border: 1px solid #999;}\
+input[type=checkbox], input[type=radio], input[type=submit]{width: auto;border: none;}\
+input:focus,textarea:focus{border-color:#000;}\
+textarea {vertical-align: top;height: 5em;resize: vertical;}\
+//fieldset {width: 410px;box-sizing: border-box;border: 1px solid #999;}\
+button {margin: 20px 0 0 124px;}\
+label {position:relative;}\
+label em { position: absolute;right: 5px;top: 20px;}\
+</style>";
+
   //Used to enable/disable the input fields for binary relays vs digital PWM and DAC outputs. 
   htmlForm += "<script>function setTypes( a ) { \
   var searchFor = \"type\"+a;\
   var x = document.getElementById(searchFor).value;\
-  if( x.indexOf( \"PWM\" ) >= 0 || x.indexOf( \"DAC\" ) >= 0 )\
+  if( x.indexOf( \"2\" ) >= 0 || x.indexOf( \"3\" ) >= 0 )\
   {\
       document.getElementById(\"pin\"+a).disabled = false;\
         document.getElementById(\"pin\"+a).min=";
@@ -1462,89 +1612,64 @@ label em {
         document.getElementById(\"step\"+a).max = 1.0;\  
   }\
 }</script>";
-  htmlForm += "<style>\
-legend { font: 10pt;}\
-h1 { margin-top: 0; }\
-form { margin: 0 auto; width: 500px;padding: 1em;border: 1px solid #CCC;border-radius: 1em;}\
-div+div { margin-top: 1em; }\
-label span{display: inline-block;width: 150px;text-align: right;}\
-input, textarea {font: 1em sans-serif;width: 150px;box-sizing: border-box;border: 1px solid #999;}\
-input[type=checkbox], input[type=radio], input[type=submit]{width: auto;border: none;}\
-input:focus,textarea:focus{border-color:#000;}\
-textarea {vertical-align: top;height: 5em;resize: vertical;}\
-fieldset {width: 410px;box-sizing: border-box;border: 1px solid #999;}\
-button {margin: 20px 0 0 124px;}\
-label {position:relative;}\
-label em { position: absolute;right: 5px;top: 20px;}\
-</style>";
-
   htmlForm += "</head>";
-  htmlForm += "<body><div class=\"container\">";
-  htmlForm += "<div class=\"row\" id=\"topbar\" bgcolor='A02222'>";
-  htmlForm += "<p> This is the setup page for the <a href=\"http://www.skybadger.net\">Skybadger</a> <a href=\"https://www.ascom-standards.org\">ASCOM</a> Switch device '";
+  
+  return htmlForm;
+}
+
+String& setupFormBuilderDeviceHeader( String& htmlForm, String& errMsg )
+{
+  String hostname = WiFi.hostname();
+
+  htmlForm = F("<body><div class=\"container\">");
+  htmlForm += F("<div class=\"row\" id=\"topbar\" bgcolor='A02222'>");
+  htmlForm += F("<p> This is the setup page for the <a href=\"http://www.skybadger.net\">Skybadger</a> <a href=\"https://www.ascom-standards.org\">ASCOM</a> device '");
   htmlForm += myHostname;
-  htmlForm += "' which uses the <a href=\"https://www.ascom-standards.org/api\">ALPACA</a> v1.0 API</b>";
-  htmlForm += "</div>";
+  htmlForm += F("' device which implements the <a href=\"https://www.ascom-standards.org/api\">ALPACA</a> v1.0 API</b> for the devices listed below:");
+  htmlForm += F("<ul><li> <a href=\"/api/v1/switch/0/setup\"> ALPACA Switch 0</a> </li>");
+  htmlForm += F("<li> <end of drivers implemented>. </li>");
+  htmlForm += F("</ul></div>");
 
   if( errMsg != NULL && errMsg.length() > 0 ) 
   {
-    htmlForm += "<div class=\"row\" id=\"errorbar\" bgcolor='lightred'>";
-    htmlForm += "<b>Error Message</b>";
-    htmlForm += "</div>";
-    htmlForm += "<hr>";
+    htmlForm += F("<div class=\"row\" id=\"errorbar\" bgcolor='lightred'>");
+    htmlForm += F("<b>Error Message</b>");
+    htmlForm += F("</div><hr>");
   }
  
-/*
-<body>
-<div class="container">
-<div class="row" id="topbar" bgcolor='A02222'><p> This is the setup page for the Skybadger <a href="https://www.ascom-standards.org">ASCOM</a> Switch device 'espASW01' which uses the <a href="https://www.ascom-standards.org/api">ALPACA</a> v1.0 API</b></div>
+  return htmlForm;
+}
 
-<!--<div class="row" id="udpDiscoveryPort" bgcolor='lightblue'>-->
-<p> This device supports the <a href="placeholder">ALPACA UDP discovery API</a> on port: 32227 </p>
-<p> It is not yet configurable.</p>
-<!-- </div> -->
-*/
-
+String& setupFormBuilderDeviceStrings( String& htmlForm )
+{
+  String hostname = WiFi.hostname();
+ 
   //UDP Discovery port 
-  htmlForm += "<p> This device supports the <a href=\"placeholder\">ALPACA UDP discovery API</a> on port: ";
+  htmlForm  = F( "<div class=\"row float-left\" id=\"topbar-device\" bgcolor='A02222'> ");
+  htmlForm += F("<div class=\"col-sm-12\">" );
+  htmlForm += F("<p> This device supports the <a href=\"placeholder\">ALPACA UDP discovery API</a> on port: ");
   htmlForm += udpPort;
-  htmlForm += "</p> <p> It is not yet configurable.</p>";
-
-  //Device instance number
+  htmlForm += F("</p></div></div>");
   
-//<div class="row">
-//<h2> Enter new hostname for device</h2><br>
-//<p>Changing the hostname will cause the device to reboot and may change the IP address!</p>
-//</div>
-//<div class="row float-left" id="deviceAttrib" bgcolor='blue'>
-//<form method="POST" id="hostname" action="http://espASW01/sethostname">
-//<label for="hostname" > Hostname </label>
-//<input type="text" name="hostname" maxlength="25" value="espASW01"/>
-//<input type="submit" value="Update" />
-//</form>
-//</div>
-
-  //Device settings hostname and number of switches on this device
-  htmlForm += "<div class=\"row\">";
-  htmlForm += "<div class=\"col-sm-12\"><h2> Enter new hostname for device</h2><br/>";
-  htmlForm += "<p>Changing the hostname will cause the device to reboot and may change the IP address!</p></div>";
-  htmlForm += "<div class=\"row float-left\" id=\"deviceAttrib\" bgcolor='blue'>";
-  htmlForm += "<form method=\"POST\" id=\"hostname\" action=\"http://";
+  //Device settings hostname 
+  htmlForm += F("<div class=\"row float-left\">");
+  htmlForm += F("<div class=\"col-sm-12\"><h2> Enter new hostname for device</h2><br/>");
+  htmlForm += F("<p>Changing the hostname will cause the device to reboot and may change the IP address!</p>");
+  htmlForm += F("<form method=\"POST\" id=\"hostname\" action=\"http://");
   htmlForm.concat( myHostname );
-  htmlForm += "/setup/hostname\">";
-  htmlForm += "<input type=\"text\" name=\"hostname\" maxlength=\"";
+  htmlForm += F("/setup/hostname\">");
+  htmlForm += F("<input type=\"text\" name=\"hostname\" maxlength=\"");
   htmlForm += String(MAX_NAME_LENGTH).c_str( );
-  htmlForm += "\" value=\"";
+  htmlForm += F("\" value=\"");
   htmlForm.concat( myHostname );
-  htmlForm += "\"/>";
-  htmlForm += "<label for=\"hostname\" > Hostname </label>";
-  htmlForm += "<input type=\"submit\" value=\"Update\" />";
-  htmlForm += "</form></div></div>";
+  htmlForm += F("\"/>");
+  htmlForm += F("<label for=\"hostname\" > Hostname </label>");
+  htmlForm += F("<input type=\"submit\" value=\"Set hostname\" />");
+  htmlForm += F("</form></div></div>");
 
   //Device settings location
-  htmlForm += "<div class=\"row\">";
-  htmlForm += "<div class=\"col-sm-12\"><h2> Enter location to be reported by Management API for device</h2><br/></div>";
-  htmlForm += "<div class=\"row float-left\" id=\"deviceAttrib\" bgcolor='blue'>";
+  htmlForm += "<div class=\"row float-left\">";
+  htmlForm += "<div class=\"col-sm-12\"><h2> Enter location to be reported by Management API for device</h2><br/>";
   htmlForm += "<form method=\"POST\" id=\"location\" action=\"http://";
   htmlForm.concat( myHostname );
   htmlForm += "/setup/location\">";
@@ -1554,28 +1679,58 @@ label em { position: absolute;right: 5px;top: 20px;}\
   htmlForm.concat( Location );
   htmlForm += "\"/>";
   htmlForm += "<label for=\"location\" > Location </label>";
-  htmlForm += "<input type=\"submit\" value=\"Update\" />";
+  htmlForm += "<input type=\"submit\" value=\"Set location\" />";
   htmlForm += "</form></div></div>";  
 
-//<div class="row float-left">
-//<h2>Configure switches</h2><br>
-//<p>Editing this to add switch components ('upscaling') will copy the existing setup to the new setup but you will need to edit the added switches. </p><p>Editing this to reduce the number of switch components ('downscaling') will delete the configuration for the switches dropped but retain those lower number switch configurations for further editing</p><br>
-//</div>
-//<div class="row float-left">
-//<form action="http://espASW01/setswitchcount" method="POST" id="switchcount" ><label for="numSwitches" >Number of switch components</label>
-//<input type="number" name="numSwitches" min="1" max="16" value="8">
-//<input type="submit" value="Update"> </form> </div>
-
-  htmlForm += "<div class=\"row float-left\"> ";
-  htmlForm += "<div class=\"col-sm-12\">";
-  htmlForm += "<h2>Configure switches</h2><br/>";
-  htmlForm += "<p>Editing this to add switch components ('upscaling') will copy the existing setup to the new setup but you will need to edit the added switches. </p>";
-  htmlForm += "<p>Editing this to reduce the number of switch components ('downscaling') will delete the configuration for the switches dropped but retain those lower number switch configurations for further editing</p><br></div></div>";
-
-  htmlForm += "<div class=\"row float-left\"><div class=\"col-sm-12\">";
-  htmlForm += "<form action=\"http://";
+ //UDP Port
+  htmlForm += "<div class=\"row float-left\" id=\"discovery-port\" >";
+  htmlForm += "<div class=\"col-sm-12\"><h2> Enter new Discovery port number for device</h2>";
+  htmlForm += "<form method=\"POST\" action=\"http://";
   htmlForm.concat( myHostname );
-  htmlForm += "/setup/numswitches\" method=\"POST\" id=\"switchcount\" >";
+  htmlForm += "/setup/udpport\">";
+  htmlForm += "<label for=\"udpport\" id=\"udpport\"> Port number to use for Management API discovery </label>";
+  htmlForm += "<input type=\"number\" name=\"udpport\" min=\"1024\" max=\"65535\" ";
+  htmlForm += "value=\"";
+  htmlForm.concat( udpPort );
+  htmlForm += "\"/>";
+  htmlForm += "<input type=\"submit\" value=\"Set port\" />";
+  htmlForm += "</form></div></div>"; 
+
+ return htmlForm;
+}
+
+String& setupFormBuilderDriverHeader( String& htmlForm, String& errMsg )
+{
+  String hostname = WiFi.hostname();
+  
+  debugI("%s", "called driver0 header ");
+  htmlForm  = F("<body> <div class=\"container-fluid\">");
+  htmlForm += F("<div class=\"row float-left\" id=\"topbar\" bgcolor=\"A02222\">");
+  htmlForm += F("<div class=\"col-sm-12\">");
+  htmlForm += F("<p> This is the driver setup page for the <a href=\"http://www.skybadger.net\">Skybadger</a> <a href=\"https://www.ascom-standards.org\">ASCOM</a> Switch device ");
+  htmlForm += myHostname;
+  htmlForm += F(" which uses the <a href=\"https://www.ascom-standards.org/api\">ALPACA</a> v1.0 API</b> for Switches");
+  htmlForm += F("<p> Click <a href=\"/setup\"> Device Management <a/> to manage the device.  </p>");
+  htmlForm += F("</div></div>");
+
+  if( errMsg != NULL && errMsg.length() > 0 ) 
+  {
+    htmlForm += F("<div class=\"row\" id=\"errorbar\" bgcolor='lightred'><div class=col-sm-12>");
+    htmlForm += F("<div class=\"col-sm-12\"><b>");
+    htmlForm.concat ( errMsg );
+    htmlForm += F("</b></div></div><hr>");
+  }
+  
+  //Setup the number of switches - should be in a separate function but lumped in here.. Separate out when have multiple drivers for this device
+  htmlForm += "<div class=\"row float-left\"> ";
+  htmlForm += "<div class=\"col-sm-12\"><h2>Configure switches</h2><br/>";
+  htmlForm += "<p>Editing this to add switch components ('upscaling') will copy the existing setup to the new setup but you will need to edit the added switches. </p>";
+  htmlForm += "<p>Editing this to reduce the number of switch components ('downscaling') will delete the configuration for the switches dropped but retain those lower number switch configurations for further editing</p><br>";
+  htmlForm += "</div></div>";
+
+  htmlForm += "<div class=\"row\" id=\"numSwitches\">";
+  htmlForm += "<div class=\"col-sm-12\">";
+  htmlForm += "<form action=\"/api/v1/switch/0/numswitches\" method=\"POST\" id=\"switchcount\" >";
   htmlForm += "<label for=\"numSwitches\" >Number of switch components</label>";
   htmlForm += "<input type=\"number\" name=\"numSwitches\" min=\"1\" max=\"";
   htmlForm += String( MAXSWITCH ).c_str();
@@ -1583,133 +1738,149 @@ label em { position: absolute;right: 5px;top: 20px;}\
   htmlForm += numSwitches;
   htmlForm += "\">";
   htmlForm += "<input type=\"submit\" value=\"Update\"> </form> </div></div>";
-
-//<div class="row float-left"> 
-//<h2>Switch configuration </h2><br>
-//<p>To configure the switch types and limits, select the switch you need below.</p>
-//</div>
-
-  htmlForm += "<div class=\"row float-left\"> ";
-  htmlForm += "<h2>Switch configuration </h2>";
-  htmlForm += "<br><p>To configure the switch types and limits, select the switch you need below.</p></div>";
-  
-//<div class="row float-left"> 
-//<form action="/api/v1/switch/0/setupswitch" Method="PUT">
-//<input type="hidden" value="0" name="switchID" />
-//<legend>Settings Switch 0</legend>
-//<label for="fname0"><span>Switch Name</span></label><input type="text" id="fname0" name="fname0" value="Switch_0" maxlength="25"><br>
-//<label for="lname0"><span>Description</span></label><input type="text" id="lname0" name="lname0" value="Default description" maxlength="25"><br>
-//<label for="type0"><span>Type</span></label><select id="type0" name="type0" onChange="setTypes( 0 )">
-//<option value="Relay_NC">Relay (NC)</option>
-//<option value="Relay_NO">Relay (NO)</option>
-//<option value="PWM">PWM</option>
-//<option value="DAC">DAC</option></select> <br>
-//<label for="pin0"><span>Hardware pin</span></label><input disabled type="number" id="pin0" name="pin0" value="0" min="0" max="16"><br>
-//<label for="min0"><span>Min value</span></label><input type="number" id="min0" name="min0" value="0.00" min="0.0" max="1.0" disabled><br>
-//<label for="max0"><span>Max value</span></label><input type="number" id="max0" name="max0" value="1.00" min="0.0" max="1.0" disabled><br>
-//<label for="step0"><span>Steps in range</span></label><input type="number" id="step0" name="step0" value="1.00" min="0" max="1024" disabled ><br>
-//<label for="writeable0"><span>Writeable</span></label><input type="radio" id="writeable0" name="writeable0" value="0" >
-//<br>
-//<input type="submit" value="Update" align="center">
-
-  //List the switches
-  for ( int i=0; i< numSwitches; i++ )
-  {
+ 
   htmlForm += "<div class=\"row float-left\">";
-  htmlForm += "<form action=\"/setup/switches\" Method=\"PUT\">";
-  htmlForm += "<input type=\"hidden\" value=\"";
-  htmlForm += i;
-  htmlForm += "\" name=\"switchId\" />";
+  htmlForm += "<div class=\"col-sm-12\" id=\"switchConfig\"> <h2>Switch configuration </h2>";
+  htmlForm += "<br><p>To configure the switch types and limits, select the switch you need below.</p></div></div>";
+  return htmlForm;
+}
 
-  htmlForm += "<legend>Settings Switch ";
-  htmlForm += i;
-  htmlForm += "</legend>";
+String& setupFormBuilderDriver0Switches( String& htmlForm, int index )
+{
+  String hostname = WiFi.hostname();
+
+  htmlForm  = F("<div class=\"row float-left\" id=\"switch" );
+  htmlForm += index;
+  htmlForm += F("\"><div class=\"col-sm-6\">" );
+  htmlForm += F("<form action=\"/api/v1/switch/0/switches\" Method=\"PUT\">" );
+  htmlForm += F("<fieldset class=\"border p2\">");
+  htmlForm += F("<input type=\"hidden\" value=\"");
+  htmlForm += index;
+  htmlForm += F("\" name=\"switchId\" />");
+
+  htmlForm += F("<legend class=\"w-auto\">Settings Switch ");
+  htmlForm += index;
+  htmlForm += F("</legend>");
 
   //Name
-  htmlForm += "<label for=\"name";
-  htmlForm += i;
-  htmlForm += "\"><span>Switch Name<span></label>";
-  htmlForm += "<input type=\"text\" id=\"fname";
-  htmlForm += i;
-  htmlForm += "\" name=\"name";
-  htmlForm += i;
-  htmlForm += "\" value=\"";
-  htmlForm += switchEntry[i]->switchName;
-  htmlForm += "\" maxlength=\"";
+  htmlForm += F("<label for=\"name");
+  htmlForm += index;
+  htmlForm += F("\"><span>Switch Name</span></label>");
+  htmlForm += F("<input type=\"text\" id=\"fname");
+  htmlForm += index;
+  htmlForm += F("\" name=\"name");
+  htmlForm += index;
+  htmlForm += F("\" value=\"");
+  htmlForm += switchEntry[index]->switchName;
+  htmlForm += F("\" maxlength=\"");
   htmlForm += String(MAX_NAME_LENGTH).c_str( );
-  htmlForm += "\"><br>";
+  htmlForm += F("\"><br>");
      
   //Description
   htmlForm += "<label for=\"description";
-  htmlForm += i;
-  htmlForm += "\"><span>Description<span></label>";
+  htmlForm += index;
+  htmlForm += "\"><span>Description</span></label>";
   htmlForm += "<input type=\"text\" id=\"lname";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" name=\"description";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" value=\"";
-  htmlForm += switchEntry[i]->description;
+  htmlForm += switchEntry[index]->description;
   htmlForm += "\" maxlength=\"";
   htmlForm += String(MAX_NAME_LENGTH).c_str( );
   htmlForm += "\"><br>";
   
   //Type - Hardware implementation detail exposed for configuration
   htmlForm += "<label for=\"type";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\"><span>Switch type</span></label>";
   htmlForm += "<select id=\"type";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" name=\"type";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" onChange=\"setTypes( ";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += " )\">";
   for( int k=0; k < 4; k++ ) 
   {
     htmlForm += "<option value=\"";
-    htmlForm += switchTypes[k].c_str();
+    htmlForm += k;
     htmlForm += "\" ";
-    if ( ( (int) switchEntry[i]->type ) == k )
-      htmlForm += "selected ";
+    if ( ( (int) switchEntry[index]->type ) == k )
+      htmlForm += " selected ";
     htmlForm += ">";
     htmlForm += switchTypes[k].c_str();
     htmlForm += "</option>";
   }
-  htmlForm += "\"</select> <br>";
+  htmlForm += "</select> <br>";
 
   //Pin - Hardware implementation detail exposed for configuration
   htmlForm += "<label for=\"pin";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\"><span>Hardware pin</span></label>";
+  
+  /*As a number field 
   htmlForm += "<input ";
-  if( switchEntry[i]->type == SWITCH_RELAY_NC || switchEntry[i]->type == SWITCH_RELAY_NO ) 
+  if( switchEntry[index]->type == SWITCH_RELAY_NC || 
+      switchEntry[index]->type == SWITCH_RELAY_NO || 
+      sizeof( pinMap ) == 0 ) 
   {
     htmlForm += "disabled" ;
   }
   htmlForm += " type=\"number\" id=\"pin";
-  htmlForm += i;
+  htmlForm += " id=\"pin";
+  htmlForm += index;
   htmlForm += "\" name=\"pin";
-  htmlForm += i;
-  htmlForm += "\" value=\"";
-  htmlForm += switchEntry[i]->pin;
+  htmlForm += index;
+  htmlform += "\" default=\"";
+  htmlForm += switchEntry[index]->pin;
   htmlForm += "\" min=\"";
   htmlForm += MINPIN;  
   htmlForm += "\" max=\"";
   htmlForm += MAXPIN;
-  htmlForm += "\" ><br>";  
+  htmlForm += "\" >
+  
+  */
+  //As a select with options 
+  //<select> <option value="audi">Audi</option> </select>
+  htmlForm += "<select ";
+  if( switchEntry[index]->type == SWITCH_RELAY_NC || 
+      switchEntry[index]->type == SWITCH_RELAY_NO || 
+      sizeof( pinMap ) == 0 ) 
+  {
+    htmlForm += "disabled" ;
+  } 
+  
+  htmlForm += " id=\"pin";
+  htmlForm += index;
+  htmlForm += "\" name=\"pin";
+  htmlForm += index;
+  htmlForm += "\">";
+  
+  int i=0;
+  while ( pinMap[i] != NULLPIN )
+  {
+    htmlForm += "<option value=\"";
+    htmlForm += pinMap[i];
+    htmlForm += "\">";
+    htmlForm += String( pinMap[i] );
+    htmlForm += "</option>";
+    i++;
+  };
+  htmlForm += "</select><br>";  
   
   //Min value for switch 
   htmlForm += "<label for=\"min";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\"><span>Switch min value</span></label>";
   htmlForm += "<input type=\"number\" id=\"min";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" name=\"min";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" value=\"";
-  htmlForm += switchEntry[i]->min;
+  htmlForm += switchEntry[index]->min;
   htmlForm += "\" min=\"";
-  if( switchEntry[i]->type == SWITCH_RELAY_NC || switchEntry[i]->type == SWITCH_RELAY_NO ) 
+  if( switchEntry[index]->type == SWITCH_RELAY_NC || switchEntry[index]->type == SWITCH_RELAY_NO ) 
   {
     htmlForm += MINVAL;  
     htmlForm += "\" max=\"";
@@ -1726,16 +1897,16 @@ label em { position: absolute;right: 5px;top: 20px;}\
 
   //Max value for switch
   htmlForm += "<label for=\"max";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\"><span>Max value</span></label>";
   htmlForm += "<input type=\"number\" id=\"max";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" name=\"max";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" value=\"";
-  htmlForm += switchEntry[i]->max;
+  htmlForm += switchEntry[index]->max;
   htmlForm += "\" min=\"";
-  if( switchEntry[i]->type == SWITCH_RELAY_NC || switchEntry[i]->type == SWITCH_RELAY_NO ) 
+  if( switchEntry[index]->type == SWITCH_RELAY_NC || switchEntry[index]->type == SWITCH_RELAY_NO ) 
   {
     htmlForm += MINVAL;  
     htmlForm += "\" max=\"";
@@ -1752,16 +1923,16 @@ label em { position: absolute;right: 5px;top: 20px;}\
   
   //Step - number of steps in range for switch
   htmlForm += "<label for=\"step";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\"><span>Steps in range</span></label>";
   htmlForm += "<input type=\"number\" id=\"step";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" name=\"step";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" value=\"";
-  htmlForm += switchEntry[i]->step;
+  htmlForm += switchEntry[index]->step;
   htmlForm += "\" min=\"";
-  if( switchEntry[i]->type == SWITCH_RELAY_NC || switchEntry[i]->type == SWITCH_RELAY_NO ) 
+  if( switchEntry[index]->type == SWITCH_RELAY_NC || switchEntry[index]->type == SWITCH_RELAY_NO ) 
   {
     htmlForm += MINVAL;  
     htmlForm += "\" max=\"";
@@ -1778,41 +1949,63 @@ label em { position: absolute;right: 5px;top: 20px;}\
 
   //Writeable
   htmlForm += "<label for=\"writeable";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\"><span>Writeable</span></label>";
   htmlForm += " &nbsp; <input type=\"radio\" value=\"on\" id=\"writeable";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" name=\"writeable";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\""; 
-  if( switchEntry[i]->writeable )
+  if( switchEntry[index]->writeable )
     htmlForm += " checked";
   htmlForm += ">";
   htmlForm += "<label for=\"writeableB";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\"><span>ReadOnly</span></label>";
   htmlForm += " &nbsp; <input type=\"radio\" value=\"off\" id=\"writeableB";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\" name=\"writeable";
-  htmlForm += i;
+  htmlForm += index;
   htmlForm += "\""; 
-  if( !switchEntry[i]->writeable )
+  if( !switchEntry[index]->writeable )
     htmlForm += " checked";
   htmlForm += "> <br>";
  
   //Form submit button. 
   htmlForm += "<input type=\"submit\" value=\"Update\">";
   htmlForm += "</fieldset> "; 
-  htmlForm += "</form></div>";
-  } //endfor
-  
-/*
-</form>
-</div>
-</body></html>
-*/
+  htmlForm += "</form></div></div>";
 
-  htmlForm += "</div></body></html>";
+  return htmlForm;
+}
+
+//footer
+String& setupFormBuilderFooter( String& htmlForm )
+{
+  //restart button
+  htmlForm =  F("<div class=\"row float-left\" id=\"restartField\" >");
+  htmlForm += F("<div class=\"col-sm-12\"><h2> Restart device</h2>");
+  htmlForm += F("<form class=\"form-inline\" method=\"POST\" action=\"http://");
+  htmlForm.concat( myHostname );
+  htmlForm += F("/restart\">");
+  htmlForm += F("<input type=\"submit\" class=\"btn btn-default\" value=\"Restart device\" />");
+  htmlForm += F("</form>");
+  htmlForm += F("</div></div>");
+  
+  //Update button
+  htmlForm += F("<div class=\"row float-left\" id=\"updateField\" >");
+  htmlForm += F("<div class=\"col-sm-12\"><h2> Update firmware</h2>");
+  htmlForm += F("<form class=\"form-inline\" method=\"GET\"  action=\"http://");
+  htmlForm.concat( myHostname );
+  htmlForm += F("/update\">");
+  htmlForm += F("<input type=\"submit\" class=\"btn btn-default\" value=\"Update firmware\" />");
+  htmlForm += F("</form>");
+  htmlForm += F("</div></div>");
+
+  //Close page
+  htmlForm += F("<div class=\"row float-left\" id=\"positions\">");
+  htmlForm += F("<div class=\"col-sm-12\"><br> </div></div>");
+  htmlForm += F("</div></body></html>");
   return htmlForm;
 }
 #endif
