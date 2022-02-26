@@ -11,11 +11,16 @@ Use of the larger ESP8266-12 SoC will also allow PWM and ADC devices to be manag
 You'd have to edit the code further for that.... but its ready.
 
 <h2>Dependencies:</h2>
-<ul><li>Arduino 1.86 IDE, </li>
-<li>ESP8266 V2.4+ </li>
+<ul>
+<li>Ascom 6.5 with ASCOM Remote or 6.5 sp1 with built-in choose support for Alpaca. </li>
+<li>Arduino 1.86 IDE, </li>
+<li>ESP8266 libraries V2.4+ </li>
 <li>Arduino MQTT client (https://pubsubclient.knolleary.net/api.html)</li>
-<li>Arduino JSON library (pre v6) </li>
+<li>Arduino JSON library (pre v6) https://arduinojson.org/v5/api/ </li>
 <li>PCF8574</li>
+<li>EepromAnything  - note I added support for c_strings to mine.</li>
+<li>RemoteDebugger https://github.com/JoaoLopesF/RemoteDebug </li>
+</ul> 
 
 <h3>Testing</h3>
 Read-only monitoring by serial port - Tx only is available from device at 115,600 baud (8n1) at 3.3v. This provides debug monitoring output via Outty or another com terminal.
