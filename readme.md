@@ -17,7 +17,7 @@ You'd have to edit the code further for that.... but its ready.
 <li>ESP8266 libraries V2.4+ http://arduino.esp8266.com/stable/package_esp8266com_index.json</li>
 <li>Arduino MQTT client (https://pubsubclient.knolleary.net/api.html)</li>
 <li>Arduino JSON library (pre v6) https://arduinojson.org/v5/api/ </li>
-<li>PCF8574 arduino i2c library https://github.com/xreef/PCF8574_library</li>
+<li>PCF8574 arduino i2c library https://github.com/RobTillaart/PCF8574.git</li>
 <li>EepromAnything  - note I added support for c_strings to mine. https://github.com/semiotproject/Arduino-libraries/blob/master/EEPROMAnything </li>
 <li>RemoteDebugger https://github.com/JoaoLopesF/RemoteDebug </li>
 </ul> 
