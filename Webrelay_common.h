@@ -18,7 +18,7 @@ const bool reverseRelayLogic = false;
 unsigned int transactionId;
 unsigned int connectedClient;
 int connectionCtr = 0; //variable to count number of times something has connected compared to disconnected. 
-bool connected = false;
+bool connected = -1; //NOT_CONNECTED;
 #define ALPACA_DISCOVERY_PORT 32227
 int udpPort = ALPACA_DISCOVERY_PORT;
 static const char* PROGMEM DriverName = "Skybadger.ESPSwitch";
@@ -31,6 +31,12 @@ static const char* PROGMEM DriverType = "Switch";
 //espasw01 GUID - "0010-0000-0000-0001";  //Pier Switch
 //espasw02 GUID - "0010-0000-0000-0002";  //Dome switch
 static const char* GUID PROGMEM = "0010-0000-0000-0000";
+//Strings
+const char* defaultHostname = "espASW00";
+char* myHostname = nullptr;
+
+//MQTT settings
+char* thisID = nullptr;
 
 #define ASCOM_DEVICE_TYPE "switch" //used in server handler uris
 //Instance defines which driver of the type it is at this IP address. Its almost always 0 unless you are running more than one switch, cover or filter/focuser 
@@ -71,7 +77,7 @@ typedef struct
   float value = 0.0F;
 } SwitchEntry;
 
-#define DEFAULT_NUM_SWITCHES 4;
+#define DEFAULT_NUM_SWITCHES 8;
 const int defaultNumSwitches = DEFAULT_NUM_SWITCHES;
 //Define the maximum number of switches supported - limited by memory really 
 const int MAXSWITCH = 16;
@@ -85,8 +91,8 @@ const float MAXBINARYVAL = 1.0F;      // true or false ? open or closed settings
 const float MINVAL = 0.0F;
 
 //Pin limits
-const int NULLPIN = 0; 
-#if defined ESP8266-01
+const int NULLPIN = -1; 
+#if defined ESP8266_01
 const int MINPIN = 0; //device specific
 const int MAXPIN = 3; //device specific
 
@@ -95,7 +101,7 @@ const int MAXPIN = 3; //device specific
 //In the case of the switch device as a dew heater controller, use 2 switch and 1 pwm pin to control all heater outputs.  
 //This means GPIO 3 needs connecting to both switching outputs. 
 const int pinMap[] = { 0, 1, 2, 3, NULLPIN }; 
-#elif defined ESP8266-12
+#elif defined ESP8266_12
 const int MINPIN = 0; //device specific
 const int MAXPIN = 16; //device specific
 
