@@ -49,10 +49,10 @@ Change Log
 19/10/2021 Updatees to normalise and fill out dependencies 
 07/01/2022 Switch settings handler not working - failing to update due to dodgy switch type handling - expecting int and receiving string. Fixed. 
 17/01/2022 Added pin type re-setting function to allow PWM pins to be changed. 
-           Need to document that PWM types used in the middle of relay ranges will remove the relay from operations. PWM should be mapped only after relays. 
+           Need to document that PWM types used in the middle of relay ranges will remove the relay from operations. PWM should be mapped as switch entries only after relays are all assigned. 
            
- */
-#define ESP8266-01
+*/
+#define ESP8266_01
 #define DEBUG_ESP_MH
 //Use for client performance testing 
 //#define DEBUG_ESP_HTTP_CLIENT
@@ -104,13 +104,6 @@ const char* BuildVersionName PROGMEM = "LWIPv2 lo memory, RDebug enabled \n";
 #else
 const char* BuildVersionName PROGMEM = "LWIPv2 lo memory, RDebug disabled \n";
 #endif 
-
-//Strings
-const char* defaultHostname = "espASW00";
-char* myHostname = nullptr;
-
-//MQTT settings
-char* thisID = nullptr;
 
 //If we want to link a switch output to a heater - is this a step too far? 
 /*
@@ -330,18 +323,16 @@ void setup()
   
   for ( int i = 0; i <= lastChannel && i < adcChannelMax; i ++ )
   {
+     //We start from low gains and wide voltage ranges to high gains and small volts. 
      for ( int k = 0; k < ADCGainSize; k++ ) 
      {
         adc.setGain( adcGainConstants[k] );   
         delay(15);
         adcReading[i] = adc.readADC_SingleEnded(adcChannelIndex); 
-        if ( adcReading[i] <= 2046 )
+        if ( adcReading[i] >= 512 && adcReading[i] <= 2046 )
         { 
           adcGainSettings[i] = k;
           DEBUG_ESP("Gain setting for channel %d is %f\n", i, adcGainFactor[k] ) ;
-        }
-        else
-        {
           break;
         }
      }   
@@ -591,7 +582,7 @@ void callback(char* topic, byte* payload, unsigned int length)
     outTopic.concat("voltage/");
     outTopic.concat(myHostname);
 
-    for( int i = 0; i<= lastChannel && i < adcChannelIndex; i++ )
+    for( int i = 0; i<= lastChannel && i < adcChannelMax ; i++ )
     {
       output="";//reset
       root["sensor"] = "ADS1015";
@@ -649,7 +640,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   outTopic = String( outHealthTopic );
   outTopic.concat( myHostname );
   client.publish( outTopic.c_str(), output.c_str(), true );  
-  Serial.printf( "topic: %s, published with value %s \n", outTopic.c_str(), output.c_str() );
+  debugI( "topic: %s, published with value %s \n", outTopic.c_str(), output.c_str() );
  }
 
 void setupWifi( void )
@@ -658,7 +649,7 @@ void setupWifi( void )
   WiFi.mode(WIFI_STA);
   WiFi.hostname( myHostname );  
 
-  WiFi.begin( String(ssid2).c_str(), String(password2).c_str() );
+  WiFi.begin( String(ssid1).c_str(), String(password1).c_str() );
   Serial.println( "Searching for WiFi..\n" );
   
   while (WiFi.status() != WL_CONNECTED) 
