@@ -867,8 +867,8 @@ void handlerStatus(void)
     root["time"] = getTimeAsString( timeString );
     root["host"] = myHostname;
     root["build version"]         = String(__DATE__) + FPSTR(BuildVersionName);
-    root["connected"] = (connected)?"true":"false";
-    root["clientId"] = connectedClient;
+    root["connected"] = ( connected != NOT_CONNECTED )?"true":"false";
+    root["connectedId"] = (int) connected;
     
     for( i = 0; i < numSwitches; i++ )
     {
@@ -891,6 +891,33 @@ void handlerStatus(void)
         entry["value"]     = switchEntry[i]->value; //Needs check limits to 1-1024, DAC and PWM limits. 
       entries.add( entry );
     }
+    
+    //Do something here about outputting the ADC records too
+#if defined USE_ADC
+      JsonArray& voltages = root.createNestedArray( "voltages" );
+      for( i = 0; i < lastChannel; i++ )
+      {
+        JsonObject& entry = jsonBuffer.createObject();
+        entry["adcReading"] = (float) adcReading[i];
+        entry["adcScale"]   = (float) adcScaleFactor[i];
+        entry["adcGain"]    = (float) adcGainFactor[ adcGainSettings[i] ];
+        switch (i) 
+        {
+          case 0: entry["12v Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] ) ;
+            break;
+          case 1: entry["5v Voltage"] =  (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] );
+            break;
+          case 2: entry["3v3 Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] );
+            break;
+          case 3: entry["Raw Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] ); 
+            break;
+          default:
+            break;
+        }
+        voltages.add( entry );
+      }
+
+#endif 
     Serial.println( message);
     
     root.printTo(message);
@@ -1240,7 +1267,7 @@ void sendDriver0Setup( int returnCode, String& message, String& err )
         }
         else
         {
-          debugD( "All 8 args found - processing " );
+          debugD( "%s\n", "All 8 args found - processing " );
           returnCode = 200;;//all found OK 
           err = "";
         }

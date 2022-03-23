@@ -49,18 +49,22 @@ Change Log
 19/10/2021 Updatees to normalise and fill out dependencies 
 07/01/2022 Switch settings handler not working - failing to update due to dodgy switch type handling - expecting int and receiving string. Fixed. 
 17/01/2022 Added pin type re-setting function to allow PWM pins to be changed. 
-           Need to document that PWM types used in the middle of relay ranges will remove the relay from operations. PWM should be mapped as switch entries only after relays are all assigned. 
-           
+           Need to document that PWM types used in the middle of relay ranges will remove the relay from operations. PWM should be mapped as switch entries only after relays are all assigned.           
 */
+//define the processor in use  - could also be ESP8266_12
 #define ESP8266_01
-#define DEBUG_ESP_MH
+//turns on debug output via debugStrings macros - either to serial or telnet if telnet is enabled. 
+#define DEBUG_ESP_MH  
 //Use for client performance testing 
-//#define DEBUG_ESP_HTTP_CLIENT
+#define DEBUG_ESP_HTTP_CLIENT
 //Manage the remote debug interface, it takes 6K of memory with all the strings 
 //#define DEBUG_DISABLED
 //#define DEBUG_DISABLE_AUTO_FUNC true
 #define WEBSOCKET_DISABLED true           //No impact to memory requirement
 #define MAX_TIME_INACTIVE 0 //to turn off the de-activation of a telnet session
+
+//Turn on or off use of the ADC for voltage monitoring
+#define USE_ADC
 
 #include "RemoteDebug.h"  //https://github.com/JoaoLopesF/RemoteDebug
 #include "DebugSerial.h"
@@ -142,6 +146,11 @@ void onTimer(void);
 void onTimeoutTimer(void);
 void setupWifi( void );
 void setPins( void );
+void publishHealth( void );
+#if defined USE_ADC
+void publishADC( void );
+#endif 
+
 
 //Make these variables rather than constants to allow the custom setup to change them and store them to EEPROM
 int numSwitches = 0;
@@ -168,17 +177,20 @@ Adafruit_ADS1015 adc;     /* Use this for the 12-bit version */
 bool adcPresent = false;
 int adcChannelIndex = 0;
 int adcChannel = 0;
-int lastChannel = 3;
+
 const int adcChannelMax = 4; //Physical max per device is 4, zero-indexed. 
 int adcGainSettings[ adcChannelMax ] = { 0,0,0,0, };
 uint16_t adcReading[4] = {0,0,0,0}; 
 
+//ESPasw01
+//int lastChannel = 2;    //12v and 3v3
 //scale factors from the resistor network for each input
 //Switch 01
-//const float adcScaleFactor[4] = { 22.3/3.3, 10.0/3.3, 1.0, 1.0 }; 
+//const float adcScaleFactor[4] = { 25.3/3.3, 13.3/3.3, 1.0, 1.0 }; 
 //switch 02 
-const float adcScaleFactor[4] = { 22.3/3.3, 8.2/3.3, 1.2/3.3, 1.0 }; 
-
+const float adcScaleFactor[4] = { 25.3/3.3, 11.5/3.3, 4.5/3.3, 1.0 }; 
+//ESPasw02
+int lastChannel = 3;      //12v, 5v and 3v3
 
 // AD0 is single ended 0-25v raw DC input
 // AD1 is single ended 0-6v regulated DC input. 
@@ -248,9 +260,10 @@ void setup()
   //for the small board in the dome switch I had to swap this around.
   //I2C setup SDA pin 5, SCL pin 4 on ESP-12
   //Switch 01
-  //Wire.begin( 2, 0 );//Normal arrangement
+  //Wire.begin( 0, 2 );// works for espasw01  - pins changed from due layout of PCF8574 
   //Switch 02 
-  Wire.begin( 2, 0 );
+  Wire.begin( 2, 0 ); //works for espasw02 and is the normal arrangement for all the other boards of this type !
+
   Wire.setClock(100000 );//100KHz target rate
 
 #if !defined DEBUG_DISABLED
@@ -321,23 +334,28 @@ void setup()
   adc.begin();
   adcPresent = true;//No function to allow us to sense the ADC. 
   
-  for ( int i = 0; i <= lastChannel && i < adcChannelMax; i ++ )
-  {
+  //Something here is just not right. Not a fucking clue what. 
+  //symptom is I always end up with reading of 4095
+  int i, k;
+  for ( i = 0, k = 0; i <= lastChannel && i < adcChannelMax; i ++ )
+  {    
+     adcReading[i]=4095;
      //We start from low gains and wide voltage ranges to high gains and small volts. 
-     for ( int k = 0; k < ADCGainSize; k++ ) 
+     while ( adcReading[i] >=4095 && k < ADCGainSize ) 
      {
+        adcGainSettings[i] = k;
         adc.setGain( adcGainConstants[k] );   
-        delay(15);
-        adcReading[i] = adc.readADC_SingleEnded(adcChannelIndex); 
-        if ( adcReading[i] >= 512 && adcReading[i] <= 2046 )
-        { 
-          adcGainSettings[i] = k;
-          DEBUG_ESP("Gain setting for channel %d is %f\n", i, adcGainFactor[k] ) ;
-          break;
-        }
-     }   
-  }
+        delay(15);        
+        adcReading[i] = adc.readADC_SingleEnded(i); 
 
+        debugI("ADC reading for channel %d is %d using gain setting %d and output %f\n", i, adcReading[i], adcGainFactor[ k ], adcReading[i]* adcGainFactor[ k ] ) ;
+        k++;
+        //otherwise try again  - increase the gain and see if we get a signal in the desired range. 
+        //If we fail we end up with the best gain by default because we saved it at the top of the loop anyway. 
+     }   
+     debugI("Final Gain setting for channel %d is %f\n", i, adcGainFactor[ adcGainSettings[i] ] ) ;
+  }
+  
 #endif 
 
   //Setup webserver handler functions
@@ -419,7 +437,7 @@ void setup()
 #if !defined DEBUG_ESP && !defined DEBUG_DISABLED
   //turn off serial debug if we are not actively debugging.
   //use telnet access for remote debugging
-   Debug.setSerialEnabled(false); 
+  Debug.setSerialEnabled(false); 
 #endif
 }
 
@@ -503,7 +521,7 @@ void loop()
         DEBUG_ESP( "ADC value[%d]: %d", adcChannelIndex, adcReading[adcChannelIndex] );
         debugV("Raw AIN[%d]: %i\n", adcChannelIndex, adcReading[adcChannelIndex] );
         debugV("Processed AIN scaling: %3.3f, AIN gain:%f\n", adcScaleFactor[adcChannelIndex], adcGainFactor[ adcGainSettings[adcChannelIndex]] );
-        debugV("Processed AIN[%d]: %f\n", adcChannelIndex, adcReading[adcChannelIndex] * adcScaleFactor[adcChannelIndex] * adcGainFactor[ adcGainSettings[adcChannelIndex]] );
+        debugV("Processed AIN[%d]: %f\n", adcChannelIndex, adcReading[adcChannelIndex] * adcGainFactor[ adcGainSettings[adcChannelIndex]] / adcScaleFactor[adcChannelIndex] );
         yield();       
       }
       debugV( "ratios of data presented: 0:1 %2.3f\n", (float) adcReading[0]/adcReading[1] );
@@ -533,7 +551,7 @@ void loop()
   {
     //reconnect();
     reconnectNB();
-    client.subscribe(String( inTopic).c_str()) ; //Seems to be needed here. 
+    client.subscribe( inTopic ) ; //Seems to be needed here. 
   }
   
   //Handle web requests
@@ -567,14 +585,14 @@ void callback(char* topic, byte* payload, unsigned int length)
   String timestamp;
   bool pubState = false;
   
-  getTimeAsString2( timestamp );
-
   //publish to our device topic(s)
   DynamicJsonBuffer jsonBuffer(256);
   
   debugI( "Publish ADC entered, adcPresent:  %i\n", adcPresent );
   if( adcPresent )
   {
+    int i=0;
+    String timestamp;
     JsonObject& root = jsonBuffer.createObject();
     output="";//reset
 
@@ -582,32 +600,36 @@ void callback(char* topic, byte* payload, unsigned int length)
     outTopic.concat("voltage/");
     outTopic.concat(myHostname);
 
-    for( int i = 0; i<= lastChannel && i < adcChannelMax ; i++ )
+    getTimeAsString2( timestamp );
+    root["time"] = timestamp;
+    root["hostname"] = myHostname;
+
+    JsonArray& voltages = root.createNestedArray( "voltages" );
+    for( i = 0; i < lastChannel; i++ )
     {
-      output="";//reset
-      root["sensor"] = "ADS1015";
-      root["time"] = timestamp;
-      root["adcReading"] = adcReading[i];
-      root["adcScale"] = adcScaleFactor[i];
-      root["adcGain"] = adcGainSettings[i];
+      JsonObject& entry = jsonBuffer.createObject();
+      entry["adcReading"] = (float) adcReading[i];
+      entry["adcScale"]   = (float) adcScaleFactor[i];
+      entry["adcGain"]    = (float) adcGainFactor[ adcGainSettings[i] ];
       switch (i) 
       {
-        case 0: root["12v Voltage"] = adcReading[i] * adcScaleFactor[i] * adcGainFactor[adcGainSettings[i]] ;
+        case 0: entry["12v Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] ) ;
           break;
-        case 1: root["5v Voltage"] = adcReading[i] * adcScaleFactor[i] * adcGainFactor[adcGainSettings[i]];
+        case 1: entry["5v Voltage"] =  (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] );
           break;
-        case 2: root["3v3 Voltage"] = adcReading[i] * adcScaleFactor[i] * adcGainFactor[adcGainSettings[i]];
+        case 2: entry["3v3 Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] );
           break;
-        case 3: root["Raw Voltage"] = adcReading[i] * adcScaleFactor[i] * adcGainFactor[adcGainSettings[i]]; 
+        case 3: entry["Raw Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] ); 
           break;
-        default: 
-          break; 
+        default:
+          break;
       }
-      root.printTo( output );
-      pubState = client.publish( outTopic.c_str(), output.c_str(), true );
-      debugI( "topic : %s published with values: %s\n", outTopic.c_str(),  output.c_str() );
-    }
-   }
+      voltages.add( entry );
+    }   
+    root.printTo( output );
+    pubState = client.publish( outTopic.c_str(), output.c_str(), true );
+    debugI( "topic : %s published with values: %s\n", outTopic.c_str(),  output.c_str() );
+  }
  }
 #endif //USE_ADC
 
@@ -649,7 +671,7 @@ void setupWifi( void )
   WiFi.mode(WIFI_STA);
   WiFi.hostname( myHostname );  
 
-  WiFi.begin( String(ssid1).c_str(), String(password1).c_str() );
+  WiFi.begin( String(ssid2).c_str(), String(password2).c_str() );
   Serial.println( "Searching for WiFi..\n" );
   
   while (WiFi.status() != WL_CONNECTED) 

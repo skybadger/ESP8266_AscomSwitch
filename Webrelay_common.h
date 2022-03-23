@@ -11,14 +11,10 @@ const bool reverseRelayLogic = true;
 const bool reverseRelayLogic = false;
 #endif
 
-//Turn on or off use of the ADC for voltage monitoring
-//#define USE_ADC
-
 //ASCOM driver common descriptor variables 
 unsigned int transactionId;
-unsigned int connectedClient;
 int connectionCtr = 0; //variable to count number of times something has connected compared to disconnected. 
-bool connected = -1; //NOT_CONNECTED;
+unsigned int connected = (unsigned int) 0; //NOT_CONNECTED;
 #define ALPACA_DISCOVERY_PORT 32227
 int udpPort = ALPACA_DISCOVERY_PORT;
 static const char* PROGMEM DriverName = "Skybadger.ESPSwitch";
@@ -30,9 +26,9 @@ static const char* PROGMEM DriverType = "Switch";
 //espasw00 GUID - "0010-0000-0000-0000"; //prototype & demo
 //espasw01 GUID - "0010-0000-0000-0001";  //Pier Switch
 //espasw02 GUID - "0010-0000-0000-0002";  //Dome switch
-static const char* GUID PROGMEM = "0010-0000-0000-0000";
+static const char* GUID PROGMEM = "0010-0000-0000-0002";
 //Strings
-const char* defaultHostname = "espASW00";
+const char* defaultHostname = "espASW02";
 char* myHostname = nullptr;
 
 //MQTT settings
@@ -77,7 +73,7 @@ typedef struct
   float value = 0.0F;
 } SwitchEntry;
 
-#define DEFAULT_NUM_SWITCHES 8;
+#define DEFAULT_NUM_SWITCHES 4;
 const int defaultNumSwitches = DEFAULT_NUM_SWITCHES;
 //Define the maximum number of switches supported - limited by memory really 
 const int MAXSWITCH = 16;
@@ -100,7 +96,7 @@ const int MAXPIN = 3; //device specific
 //Cos that just leaves Rx at GPIO3 and external power circuitry is required. 
 //In the case of the switch device as a dew heater controller, use 2 switch and 1 pwm pin to control all heater outputs.  
 //This means GPIO 3 needs connecting to both switching outputs. 
-const int pinMap[] = { 0, 1, 2, 3, NULLPIN }; 
+const int pinMap[] = { 1, 3, NULLPIN }; 
 #elif defined ESP8266_12
 const int MINPIN = 0; //device specific
 const int MAXPIN = 16; //device specific
