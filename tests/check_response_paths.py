@@ -21,10 +21,13 @@ class ResponsePaths(unittest.TestCase):
 
     def test_missing_id_exit_serializes_via_sender(self):
         source = (ROOT / "ESP8266_relayhandler.h").read_text(encoding="utf-8")
-        match = re.search(r'String output = "Missing argument: switchID";(.*?)return;', source, re.S)
+        match = re.search(r'bool readSwitchId\(.*?\n\{(.*?)\n\}', source, re.S)
         self.assertIsNotNone(match)
-        self.assertIn('root["ErrorNumber"]', match[1])
-        self.assertIn("sendSwitchResponse(root, message);", match[1])
+        self.assertIn("return switchRequestError(root, message,", match[1])
+        error_sender = re.search(r'bool switchRequestError\(.*?\n\{(.*?)\n\}', source, re.S)
+        self.assertIsNotNone(error_sender)
+        self.assertIn('root["ErrorNumber"] = invalidValue;', error_sender[1])
+        self.assertIn("sendSwitchResponse(root, message);", error_sender[1])
 
     def test_connected_is_registered_only_for_get_and_put(self):
         source = (ROOT / "ESP8266_AscomSwitch.ino").read_text(encoding="utf-8")

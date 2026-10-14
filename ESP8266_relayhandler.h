@@ -40,6 +40,7 @@ Internally this code keeps the state of the switch in the switchEntry structure 
 #include "RelayOutput.h"
 #include "PwmOutput.h"
 #include "AlpacaResponse.h"
+#include "AlpacaRequest.h"
 #include <errno.h>
 #include <stdlib.h>
 
@@ -48,6 +49,70 @@ void sendSwitchResponse(JsonObject& root, String& message)
     message = "";
     ASCOM_JSON_SERIALIZE(root, message);
     sendAlpacaJson(server, message);
+}
+
+bool switchRequestError(JsonObject& root, String& message, const char* error)
+{
+    root["ErrorNumber"] = invalidValue;
+    root["ErrorMessage"] = error;
+    sendSwitchResponse(root, message);
+    return false;
+}
+
+bool beginSwitchRequest(JsonObject& root, String& message, const char* method)
+{
+    uint32_t clientID = 0;
+    uint32_t transID = 0;
+    String clientText, transText;
+    const auto clientStatus = findAlpacaArgument(server, "ClientID", clientText);
+    const auto transStatus = findAlpacaArgument(server, "ClientTransactionID", transText);
+    const bool clientValid = clientStatus == ALPACA_ARG_MISSING ||
+        (clientStatus == ALPACA_ARG_PRESENT && parseAlpacaUInt32(clientText.c_str(), clientID));
+    const bool transValid = transStatus == ALPACA_ARG_MISSING ||
+        (transStatus == ALPACA_ARG_PRESENT && parseAlpacaUInt32(transText.c_str(), transID));
+    jsonResponseBuilder(root, clientID, transID, serverTransID++, method, Success, "");
+    if (!clientValid || !transValid)
+        return switchRequestError(root, message, "Invalid or duplicate ClientID/ClientTransactionID");
+    return true;
+}
+
+bool readSwitchId(JsonObject& root, String& message, int& id)
+{
+    String text;
+    uint32_t parsed = 0;
+    if (findAlpacaArgument(server, "Id", text) != ALPACA_ARG_PRESENT ||
+        !parseAlpacaUInt32(text.c_str(), parsed) || parsed > 32767 ||
+        numSwitches <= 0 || parsed >= (uint32_t) numSwitches)
+        return switchRequestError(root, message, "Missing, duplicate, malformed or out-of-range Id");
+    id = (int) parsed;
+    return true;
+}
+
+bool readSwitchBool(JsonObject& root, String& message, bool& state)
+{
+    String text;
+    if (findAlpacaArgument(server, "State", text) != ALPACA_ARG_PRESENT ||
+        !parseAlpacaBool(text.c_str(), state))
+        return switchRequestError(root, message, "State must be a single true or false argument");
+    return true;
+}
+
+bool readSwitchValue(JsonObject& root, String& message, double& value)
+{
+    String text;
+    if (findAlpacaArgument(server, "Value", text) != ALPACA_ARG_PRESENT ||
+        !parseAlpacaDouble(text.c_str(), value))
+        return switchRequestError(root, message, "Value must be a single finite decimal number");
+    return true;
+}
+
+bool requireWritableSwitch(int id, JsonObject& root, String& message)
+{
+    if (switchEntry[id]->writeable) return true;
+    root["ErrorNumber"] = notImplemented;
+    root["ErrorMessage"] = "This switch is read-only";
+    sendSwitchResponse(root, message);
+    return false;
 }
 
 bool setRelayOutput(unsigned int switchID, double value, JsonObject& root)
@@ -265,16 +330,10 @@ bool getUriField( char* inString, int searchIndex, String& outRef )
 void handlerDriver0Maxswitch(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "MaxSwitch", Success , "" );    
+    ASCOM_JSON_OBJECT(root, 256);
+    if (!beginSwitchRequest(root, message, "MaxSwitch")) return;
     root["Value"] = numSwitches;
-    
     sendSwitchResponse(root, message);
-    return ;
 }
 
 //GET ​/switch​/{device_number}​/canwrite
@@ -282,35 +341,11 @@ void handlerDriver0Maxswitch(void)
 void handlerDriver0CanWrite(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int switchID = -1;
-    String argToSearchFor = "Id";
-
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "CanWrite", Success , "" );    
-
-    if( hasArgIC( argToSearchFor, server, false ) )
-    {
-      switchID = server.arg(argToSearchFor).toInt();
-      if ( switchID >= 0 && switchID < numSwitches ) 
-      {
-        root["Value"] = switchEntry[switchID]->writeable;
-      }
-      else
-      {
-        root["ErrorMessage"] = "Argument switch Id out of range";
-        root["ErrorNumber"] = (int) invalidValue ; 
-      }
-    }
-    else
-    {
-        root["ErrorMessage"] = "Missing switchID argument";
-        root["ErrorNumber"] = (int) invalidOperation ;       
-    }
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "CanWrite") || !readSwitchId(root, message, id)) return;
+    root["Value"] = switchEntry[id]->writeable;
     sendSwitchResponse(root, message);
-    return ;
 }
 
 //GET ​/switch​/{device_number}​/getswitch
@@ -319,121 +354,39 @@ void handlerDriver0CanWrite(void)
 void handlerDriver0SwitchState(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    double switchValue; 
-    bool bValue;
-    bool newState = false;
-    int switchID = -1;
-    String argToSearchFor[2] = {"Id", "State"};
-    
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchState", Success , "" );    
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "SwitchState") || !readSwitchId(root, message, id)) return;
 
-    if( hasArgIC( argToSearchFor[0], server, false ) )
-      switchID = server.arg( argToSearchFor[0] ).toInt();
-    else
+    SwitchEntry& entry = *switchEntry[id];
+    if (server.method() == HTTP_GET)
     {
-       String output = "Missing argument: switchID";
-       root["ErrorNumber"] = invalidOperation;
-       root["ErrorMessage"] = output; 
-       sendSwitchResponse(root, message);
-       return;
-    }
- 
-    DEBUGS1( "SwitchID:"); DEBUGSL1( switchID); 
-    if ( switchID >= 0 && switchID < numSwitches )
-    {
-      if (server.method() == HTTP_PUT && !switchEntry[switchID]->writeable)
-      {
-        root["ErrorNumber"] = notImplemented;
-        root["ErrorMessage"] = "This switch is read-only";
-        sendSwitchResponse(root, message);
-        return;
-      }
-      if( server.method() == HTTP_GET  )
-      {
-        switch ( switchEntry[switchID]->type ) 
+        if (entry.type == SWITCH_RELAY_NO || entry.type == SWITCH_RELAY_NC)
+            root["Value"] = entry.value == 1.0F;
+        else if (entry.type == SWITCH_PWM)
+            root["Value"] = pwmSwitchState(entry.value, entry.min);
+        else
         {
-          case SWITCH_RELAY_NO:
-          case SWITCH_RELAY_NC:
-            switchValue = switchEntry[switchID]->value;
-            if ( switchValue != 1.0F ) 
-              bValue = false;
-            else 
-              bValue = true;      
-            root["Value"] =  bValue;  
-            break;
-          case SWITCH_PWM:
-            root["Value"] = pwmSwitchState(switchEntry[switchID]->value,
-                                            switchEntry[switchID]->min);
-            break;          
-          case SWITCH_ANALG_DAC:
-          default:
-            root["ErrorMessage"] = "Invalid state retrieval for switch type - not boolean"  ;
-            root["ErrorNumber"] = invalidValue ;
-          break;
+            root["ErrorNumber"] = invalidOperation;
+            root["ErrorMessage"] = "Boolean state is unavailable for this switch type";
         }
-      }
-      else if (server.method() == HTTP_PUT && hasArgIC( argToSearchFor[1], server, false ) )
-      {
-        switch( switchEntry[switchID]->type )
-        {
-          case SWITCH_RELAY_NO:
-          case SWITCH_RELAY_NC:
-              DEBUGSL1( "Found relay to set");
-              if( server.arg( argToSearchFor[1] ).equalsIgnoreCase( "true" ) )
-                newState = true;
-              else
-                newState = false;
-              setRelayOutput(switchID, newState ? 1.0 : 0.0, root);
-            break;
-          case SWITCH_PWM:
-              DEBUGSL1( "Found PWM to set");
-              {
-                String requestedState = server.arg(argToSearchFor[1]);
-                requestedState.trim();
-                if (!requestedState.equalsIgnoreCase("true") &&
-                    !requestedState.equalsIgnoreCase("false"))
-                {
-                  root["ErrorNumber"] = invalidValue;
-                  root["ErrorMessage"] = "State must be true or false";
-                }
-                else
-                  setPwmOutput(switchID,
-                               pwmBooleanValue(requestedState.equalsIgnoreCase("true"),
-                                               switchEntry[switchID]->min,
-                                               switchEntry[switchID]->max), root);
-              }
-            break;
-          
-          case SWITCH_ANALG_DAC:
-          default:
-            root["ErrorMessage"] = "Invalid state for non-boolean switch type"  ;
-            root["ErrorNumber"] = invalidOperation ;
-            break;
-        }
-      } 
-      else
-      {
-         String output = "";
-         Serial.println( "Error: method not available" );
-         root["ErrorNumber"] = invalidOperation;
-         output = "http verb:";
-         output += server.method();
-         output += " not available";
-         root["ErrorMessage"] = output; 
-      }  
     }
     else
     {
-        root["ErrorMessage"] = "Invalid switch ID as argument";
-        root["ErrorNumber"] = invalidValue ;
+        if (!requireWritableSwitch(id, root, message)) return;
+        bool state = false;
+        if (!readSwitchBool(root, message, state)) return;
+        if (entry.type == SWITCH_RELAY_NO || entry.type == SWITCH_RELAY_NC)
+            setRelayOutput(id, state ? 1.0 : 0.0, root);
+        else if (entry.type == SWITCH_PWM)
+            setPwmOutput(id, pwmBooleanValue(state, entry.min, entry.max), root);
+        else
+        {
+            root["ErrorNumber"] = notImplemented;
+            root["ErrorMessage"] = "Output is not implemented for this switch type";
+        }
     }
-
     sendSwitchResponse(root, message);
-    return;
 }
 
 //GET ​/switch​/{device_number}​/getswitchdescription
@@ -441,34 +394,11 @@ void handlerDriver0SwitchState(void)
 void handlerDriver0SwitchDescription(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    String argToSearchFor = "Id";
-    int switchID = -1;
-          
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchDescription", Success, "" );    
-
-    if( hasArgIC( argToSearchFor, server, false ) )
-    {
-      switchID = server.arg( argToSearchFor ).toInt();
-      if( switchID >=0 && switchID < numSwitches )
-          root["Value"] = switchEntry[switchID]->description;
-      else
-      {
-         root["ErrorNumber"] = invalidValue;
-         root["ErrorMessage"] = "Out of range argument: switchID"; 
-      }
-    }  
-    else
-    {
-       root["ErrorNumber"] = invalidOperation;
-       root["ErrorMessage"] = "Missing argument: switchID"; 
-    }
-
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "SwitchDescription") || !readSwitchId(root, message, id)) return;
+    root["Value"] = switchEntry[id]->description;
     sendSwitchResponse(root, message);
-    return;
 }
 
 //GET ​/switch​/{device_number}​/getswitchname
@@ -477,63 +407,39 @@ void handlerDriver0SwitchDescription(void)
 void handlerDriver0SwitchName(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int switchID;
-    String newName =  "";
-    String argToSearchFor[2] = {"Id", "Name"};
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchName", Success, "" );    
-    
-    if( hasArgIC( argToSearchFor[0], server, false ) )
-    {
-      switchID = server.arg(argToSearchFor[0]).toInt();
-      if ( switchID >= 0 && switchID < numSwitches  )
-      {
-        if ( server.method() == HTTP_GET )
-        {
-            root["Value"] = switchEntry[switchID]->switchName;
-        }
-        else if( server.method() == HTTP_PUT && hasArgIC( argToSearchFor[1], server, false ) )
-        {
-            int sLen = strlen( server.arg( argToSearchFor[1] ).c_str() );
-            if ( sLen > MAX_NAME_LENGTH -1 )
-            {
-              root["ErrorMessage"]= "Switch name too long";
-              root["ErrorNumber"] = invalidValue ;
-            }
-            else
-            {
-              if ( switchEntry[switchID]->switchName != nullptr ) 
-                free( switchEntry[switchID]->switchName );
-              switchEntry[switchID]->switchName  = (char*) calloc( MAX_NAME_LENGTH, sizeof(char) );
-              strcpy( switchEntry[switchID]->switchName, server.arg( argToSearchFor[1] ).c_str() );
-            }                    
-        }
-        else
-        {
-           //Invalid http verb 
-           root["ErrorMessage"]= "Invalid HTTP verb found";
-           root["ErrorNumber"] = invalidOperation;
-        }
-      }
-      else
-      {
-        //invalid switch id 
-        root["ErrorMessage"]= "Invalid switch ID - outside range";
-        root["ErrorNumber"] = invalidValue ;
-      }
-    }
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "SwitchName") || !readSwitchId(root, message, id)) return;
+
+    if (server.method() == HTTP_GET)
+        root["Value"] = switchEntry[id]->switchName;
     else
     {
-      //invalid switch id 
-      root["ErrorMessage"]= "Missing switch ID";
-      root["ErrorNumber"] = invalidOperation ;
+        String name;
+        if (findAlpacaArgument(server, "Name", name) != ALPACA_ARG_PRESENT)
+        {
+            switchRequestError(root, message, "Name must be supplied exactly once");
+            return;
+        }
+        if (name.length() >= MAX_NAME_LENGTH)
+        {
+            switchRequestError(root, message, "Switch name too long");
+            return;
+        }
+        if (switchEntry[id]->switchName == nullptr)
+        {
+            switchEntry[id]->switchName = (char*) calloc(MAX_NAME_LENGTH, sizeof(char));
+            if (switchEntry[id]->switchName == nullptr)
+            {
+                root["ErrorNumber"] = invalidOperation;
+                root["ErrorMessage"] = "Unable to allocate switch name";
+                sendSwitchResponse(root, message);
+                return;
+            }
+        }
+        strcpy(switchEntry[id]->switchName, name.c_str());
     }
-
     sendSwitchResponse(root, message);
-    return;
 }
 
 //Non-ascom function
@@ -629,111 +535,38 @@ void handlerDriver0SwitchType(void)
 void handlerDriver0SwitchValue(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    float value = 0.0F;
-    uint32_t switchID = 0;
-    String argToSearchFor[2] = {"Id", "Value"};
-    
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchValue", 0, "" );    
-    
-    if ( hasArgIC( argToSearchFor[0], server, false ) )
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "SwitchValue") || !readSwitchId(root, message, id)) return;
+
+    SwitchEntry& entry = *switchEntry[id];
+    if (server.method() == HTTP_GET)
     {
-      switchID = server.arg( argToSearchFor[0] ).toInt();
-    }
-    else
-    {
-      root["ErrorMessage"] = "Missing argument - switchID ";
-      root["ErrorNumber"] = invalidValue ;
-      sendSwitchResponse(root, message);
-      return;      
-    }
-      
-    if ( switchID >= 0 && switchID < (uint32_t) numSwitches )
-    {
-        if (server.method() == HTTP_PUT && !switchEntry[switchID]->writeable)
-        {
-          root["ErrorNumber"] = notImplemented;
-          root["ErrorMessage"] = "This switch is read-only";
-          sendSwitchResponse(root, message);
-          return;
-        }
-        if( server.method() == HTTP_GET )
-        {
-          switch( switchEntry[switchID]->type )
-          {
-            case SWITCH_PWM: 
-                  root["Value"] = switchEntry[switchID]->value;
-                  break;
-            case SWITCH_ANALG_DAC:
-                  root["Value"] = switchEntry[switchID]->value;
-                  break;                
-            case SWITCH_RELAY_NO:
-            case SWITCH_RELAY_NC:
-                  root["Value"] = (double) switchEntry[switchID]->value;
-                  break;
-            default:
-              break;           
-          }
-        }
-        else if( server.method() == HTTP_PUT && hasArgIC( argToSearchFor[1], server, false ) )
-        {
-          value = (float) server.arg( argToSearchFor[1] ).toFloat();
-          switch( switchEntry[switchID]->type ) 
-          {
-            case SWITCH_PWM: 
-                  setPwmOutput(switchID, value, root);
-                  break;
-                  
-            case SWITCH_RELAY_NO:
-            case SWITCH_RELAY_NC:
-                {
-                  // Full parsing here prevents text/partial numbers becoming a
-                  // relay-off command; general API parsing is a later step.
-                  String requestedValue = server.arg(argToSearchFor[1]);
-                  requestedValue.trim();
-                  char* end = nullptr;
-                  errno = 0;
-                  const double relayValue = strtod(requestedValue.c_str(), &end);
-                  if (requestedValue.length() == 0 || *end != '\0' || errno == ERANGE)
-                  {
-                    root["ErrorNumber"] = invalidValue;
-                    root["ErrorMessage"] = "Relay value must be a number equal to 0 or 1";
-                  }
-                  else
-                    setRelayOutput(switchID, relayValue, root);
-                }
-                  break;
-            case SWITCH_ANALG_DAC:
-                  if ( value >= switchEntry[switchID]->min && 
-                       value <= switchEntry[switchID]->max )
-                  {
-                    switchEntry[switchID]->value = value;
-                    //e.g. analogue_write( switchEntry[switchID]->value, switchEntry[switchID]->pin );
-                    root["ErrorMessage"] = "DAC Not implemented yet - Invalid digital operation for switch";
-                    root["ErrorNumber"] = invalidOperation ;
-                  }
-                  break;
-            default:
-              break;
-          }
-        }
+        if (entry.type == SWITCH_RELAY_NO || entry.type == SWITCH_RELAY_NC ||
+            entry.type == SWITCH_PWM || entry.type == SWITCH_ANALG_DAC)
+            root["Value"] = (double) entry.value;
         else
         {
-           root["ErrorMessage"] = "Invalid HTTP verb method for this URI or missing output value";
-           root["ErrorNumber"] = invalidOperation ;
+            root["ErrorNumber"] = invalidOperation;
+            root["ErrorMessage"] = "Value is unavailable for this switch type";
         }
     }
     else
     {
-      root["ErrorMessage"] = "SwitchID value out of range.";
-      root["ErrorNumber"] = invalidValue ;
-    }            
-    
+        if (!requireWritableSwitch(id, root, message)) return;
+        double value = 0;
+        if (!readSwitchValue(root, message, value)) return;
+        if (entry.type == SWITCH_RELAY_NO || entry.type == SWITCH_RELAY_NC)
+            setRelayOutput(id, value, root);
+        else if (entry.type == SWITCH_PWM)
+            setPwmOutput(id, value, root);
+        else
+        {
+            root["ErrorNumber"] = notImplemented;
+            root["ErrorMessage"] = "Output is not implemented for this switch type";
+        }
+    }
     sendSwitchResponse(root, message);
-    return;
 }
   
 //GET ​/switch​/{device_number}​/minswitchvalue
@@ -741,35 +574,11 @@ void handlerDriver0SwitchValue(void)
 void handlerDriver0MinSwitchValue(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int switchID  = -1;
-    String argToSearchFor = "id";
-    
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "MinSwitchValue", Success, "" );    
-    
-    if ( hasArgIC( argToSearchFor, server, false  ) )
-    {
-      switchID = server.arg( argToSearchFor ).toInt();
-      if( switchID >= 0 && switchID < numSwitches )
-      {  
-        root.set<double>("Value", switchEntry[switchID]->min );
-      }
-      else
-      {
-        root["ErrorMessage"] = "SwitchID value out of range.";
-        root["ErrorNumber"] = invalidValue ;
-      }
-    }
-    else
-    {
-      root["ErrorMessage"] = "SwitchID argument missing .";
-      root["ErrorNumber"] = invalidOperation ;
-    }
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "MinSwitchValue") || !readSwitchId(root, message, id)) return;
+    root["Value"] = (double) switchEntry[id]->min;
     sendSwitchResponse(root, message);
-    return;
 }
 
 //GET ​/switch​/{device_number}​/maxswitchvalue
@@ -777,35 +586,11 @@ void handlerDriver0MinSwitchValue(void)
 void handlerDriver0MaxSwitchValue(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int switchID  = -1;
-    String argToSearchFor = "Id";
-    
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "MaxSwitchValue", Success, "" );    
-
-    if ( hasArgIC(argToSearchFor, server, false ) )
-    {
-      switchID = server.arg(argToSearchFor).toInt();
-      if ( switchID >= 0 && switchID < numSwitches )
-      {
-        root.set<double>("Value", switchEntry[switchID]->max );
-      }
-      else
-      {
-        root["ErrorMessage"] = "SwitchID value out of range.";
-        root["ErrorNumber"] = invalidValue ;
-      }
-    }
-    else
-    {
-       root["ErrorMessage"] = "Missing switchID argument.";
-       root["ErrorNumber"] = invalidOperation  ;
-    }
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "MaxSwitchValue") || !readSwitchId(root, message, id)) return;
+    root["Value"] = (double) switchEntry[id]->max;
     sendSwitchResponse(root, message);
-    return;
 }
 
 //GET ​/switch​/{device_number}​/switchstep
@@ -813,35 +598,11 @@ void handlerDriver0MaxSwitchValue(void)
 void handlerDriver0SwitchStep(void)
 {
     String message;
-    uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-    uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    uint32_t switchID = -1;
-    String argToSearchFor = "Id";
-    
-    DynamicJsonBuffer jsonBuffer(256);
-    JsonObject& root = jsonBuffer.createObject();
-    jsonResponseBuilder( root, clientID, transID, serverTransID++, "SwitchStep", Success, "" );    
-
-    if ( hasArgIC(argToSearchFor, server, false ) )
-    {
-      switchID = server.arg(argToSearchFor).toInt();
-      if( switchID >= 0 && switchID < (uint32_t) numSwitches ) 
-      {
-        root.set<double>("Value", switchEntry[switchID]->step );        
-      }
-      else
-      {
-         root["ErrorMessage"] = "SwitchID out of range.";
-         root["ErrorNumber"] = invalidValue ;
-      }
-    }
-    else
-    {
-       root["ErrorMessage"] = "Missing switchID argument.";
-       root["ErrorNumber"] = invalidOperation ;
-    }
+    ASCOM_JSON_OBJECT(root, 256);
+    int id = -1;
+    if (!beginSwitchRequest(root, message, "SwitchStep") || !readSwitchId(root, message, id)) return;
+    root["Value"] = (double) switchEntry[id]->step;
     sendSwitchResponse(root, message);
-    return;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
