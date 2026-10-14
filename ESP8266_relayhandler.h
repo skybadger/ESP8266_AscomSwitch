@@ -37,6 +37,33 @@ Internally this code keeps the state of the switch in the switchEntry structure 
 #include <Wire.h>
 #include "AlpacaErrorConsts.h"
 #include "ASCOMAPISwitch_rest.h"
+#include "RelayOutput.h"
+#include <errno.h>
+#include <stdlib.h>
+
+bool setRelayOutput(unsigned int switchID, double value, JsonObject& root)
+{
+    RelayWriteResult result = writeRelayOutput(switchDevice, switchID, value,
+                                               reverseRelayLogic, switchEntry[switchID]->value);
+    switch (result)
+    {
+      case RELAY_WRITE_OK:
+        return true;
+      case RELAY_INVALID_VALUE:
+        root["ErrorNumber"] = invalidValue;
+        root["ErrorMessage"] = "Relay value must be 0 or 1";
+        break;
+      case RELAY_INVALID_PIN:
+        root["ErrorNumber"] = invalidValue;
+        root["ErrorMessage"] = "Relay Id exceeds the eight PCF8574 outputs";
+        break;
+      case RELAY_WRITE_FAILED:
+        root["ErrorNumber"] = invalidOperation;
+        root["ErrorMessage"] = "PCF8574 relay write failed";
+        break;
+    }
+    return false;
+}
 
 //Function definitions
 void copySwitch( SwitchEntry* sourceSe, SwitchEntry* targetSe );
@@ -334,11 +361,7 @@ void handlerDriver0SwitchState(void)
                 newState = true;
               else
                 newState = false;
-              if( reverseRelayLogic )
-                switchDevice.write( switchID, (newState) ? 0 : 1 );
-              else
-                switchDevice.write( switchID, (newState) ? 1 : 0 );
-              switchEntry[switchID]->value = (newState)? 1.0F : 0.0F;
+              setRelayOutput(switchID, newState ? 1.0 : 0.0, root);
               returnCode = 200;              
             break;
           case SWITCH_PWM:
@@ -632,9 +655,7 @@ void handlerDriver0SwitchValue(void)
                   break;                
             case SWITCH_RELAY_NO:
             case SWITCH_RELAY_NC:
-                  returnCode = 400;
-                  root["ErrorMessage"] = "Invalid analogue operation for binary/boolean switch type - use getSwitch";
-                  root["ErrorNumber"] = invalidOperation ;
+                  root["Value"] = (double) switchEntry[switchID]->value;
                   break;
             default:
               break;           
@@ -663,9 +684,23 @@ void handlerDriver0SwitchValue(void)
                   
             case SWITCH_RELAY_NO:
             case SWITCH_RELAY_NC:
-                  returnCode = 400;
-                  root["ErrorMessage"] = "Invalid analogue operation for binary/boolean switch type";
-                  root["ErrorNumber"] = invalidOperation ;
+                {
+                  // Full parsing here prevents text/partial numbers becoming a
+                  // relay-off command; general API parsing is a later step.
+                  String requestedValue = server.arg(argToSearchFor[1]);
+                  requestedValue.trim();
+                  char* end = nullptr;
+                  errno = 0;
+                  const double relayValue = strtod(requestedValue.c_str(), &end);
+                  if (requestedValue.length() == 0 || *end != '\0' || errno == ERANGE)
+                  {
+                    root["ErrorNumber"] = invalidValue;
+                    root["ErrorMessage"] = "Relay value must be a number equal to 0 or 1";
+                  }
+                  else
+                    setRelayOutput(switchID, relayValue, root);
+                  returnCode = 200;
+                }
                   break;
             case SWITCH_ANALG_DAC:
                   if ( value >= switchEntry[switchID]->min && 

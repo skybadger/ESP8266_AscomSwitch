@@ -64,6 +64,18 @@ The user confirmed that each high-priority fix still needs its own acceptance ch
 
 Validation: ESP-01 compile/link succeeded (47.77 seconds); flash 399,915 bytes, static RAM 46,052 bytes. Both guards were reviewed against the hardware-write/cache-mutation paths. Live HTTP and hardware tests require a connected device and have not been run. The user accepted this item by selecting option 2. Commit message: `Reject state and value writes to read-only Alpaca switches`. Timestamp acceptance remains pending.
 
+Committed as `a6e725d`. Only the accepted guard insertions and this log were staged; existing source edits and the pending timestamp change were left out.
+
+### High priority 2 — numeric relay values (accepted)
+
+- `handlerDriver0SwitchValue` now returns the logical cached relay state as a number for both Relay_NO and Relay_NC, instead of rejecting GetSwitchValue.
+- Both SetSwitch and relay SetSwitchValue call `setRelayOutput`, backed by the new `RelayOutput.h`. The backend accepts only exactly 0 or 1, preserves the existing global reverseRelayLogic convention, bounds the pin to the eight outputs of the single PCF8574, and updates the logical cache only after a successful bus write. It returns descriptive errors for invalid values/pins and I2C failures.
+- Relay numeric PUT parsing uses strtod with complete-consumption and range-error checks so blank text, partial numbers and overflow/underflow cannot become unintended relay commands. General request/boolean parsing remains the separate later high-priority item. The existing CanWrite guards continue to reject read-only setters before the backend is called.
+- `tests/relay_output_checks.cpp` evaluates the actual templated backend at compile time against a mock expander, using the ESP8266 compiler: active-high and active-low 0/1 transitions, negative/fractional/above-one values, NaN, infinity, pin 8 rejection and cache preservation after an I2C error. All nine static assertions passed with `-Wall -Wextra -Werror`.
+- Full PlatformIO compile/link passed in 47.23 seconds, with no format diagnostics. Flash: 400,491 bytes; static RAM: 46,068 bytes. Test objects are compiled separately and are excluded from the production source filter. No live HTTP or physical relay test was performed. The existing expander address still needs hardware verification, as already recorded in the review.
+- Before: numeric relay reads/writes return unsupported-operation errors. After: a valid `Value=1` uses the same output backend as `State=true`, and GetSwitchValue returns numeric 1; `Value=0` corresponds to State=false. Invalid values fail without writing or changing the cache.
+- The user accepted this fix. Commit message: `Support numeric relay values through a shared output backend`.
+
 Scope: Alpaca transport `/api/v1`, its management/discovery services, and the advertised synchronous SwitchV2 interface. API version 1 and Switch interface version 2 are different numbers. Later asynchronous Switch interfaces are outside this baseline.
 
 References: [Alpaca API reference, document 1.0](https://ascom-standards.org/ASCOM%20Alpaca%20API%20Reference.pdf), [official API schemas](https://ascom-standards.org/api/), [SwitchV2 interface](https://ascom-standards.org/Help/Developer/html/T_ASCOM_DeviceInterface_ISwitchV2.htm), [SetSwitch contract](https://ascom-standards.org/Help/Developer/html/M_ASCOM_DeviceInterface_ISwitchV2_SetSwitch.htm), [PlatformIO ESP-01 target](https://docs.platformio.org/en/stable/boards/espressif8266/esp01_1m.html), and [external libraries option](https://docs.platformio.org/en/stable/projectconf/sections/env/options/library/lib_extra_dirs.html).
