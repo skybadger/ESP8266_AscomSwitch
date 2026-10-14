@@ -287,6 +287,14 @@ void handlerDriver0SwitchState(void)
     DEBUGS1( "SwitchID:"); DEBUGSL1( switchID); 
     if ( switchID >= 0 && switchID < numSwitches )
     {
+      if (server.method() == HTTP_PUT && !switchEntry[switchID]->writeable)
+      {
+        root["ErrorNumber"] = notImplemented;
+        root["ErrorMessage"] = "This switch is read-only";
+        ASCOM_JSON_SERIALIZE(root, message);
+        server.send(200, "application/json", message);
+        return;
+      }
       if( server.method() == HTTP_GET  )
       {
         switch ( switchEntry[switchID]->type ) 
@@ -603,6 +611,14 @@ void handlerDriver0SwitchValue(void)
       
     if ( switchID >= 0 && switchID < (uint32_t) numSwitches )
     {
+        if (server.method() == HTTP_PUT && !switchEntry[switchID]->writeable)
+        {
+          root["ErrorNumber"] = notImplemented;
+          root["ErrorMessage"] = "This switch is read-only";
+          ASCOM_JSON_SERIALIZE(root, message);
+          server.send(200, "application/json", message);
+          return;
+        }
         if( server.method() == HTTP_GET )
         {
           switch( switchEntry[switchID]->type )
