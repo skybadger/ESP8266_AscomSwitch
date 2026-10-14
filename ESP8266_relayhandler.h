@@ -38,6 +38,7 @@ Internally this code keeps the state of the switch in the switchEntry structure 
 #include "AlpacaErrorConsts.h"
 #include "ASCOMAPISwitch_rest.h"
 #include "RelayOutput.h"
+#include "PwmOutput.h"
 #include <errno.h>
 #include <stdlib.h>
 
@@ -60,6 +61,36 @@ bool setRelayOutput(unsigned int switchID, double value, JsonObject& root)
       case RELAY_WRITE_FAILED:
         root["ErrorNumber"] = invalidOperation;
         root["ErrorMessage"] = "PCF8574 relay write failed";
+        break;
+    }
+    return false;
+}
+
+struct ArduinoPwmOutput {
+    void setRange(unsigned int range) { analogWriteRange(range); }
+    void write(int pin, int value) { analogWrite(pin, value); }
+};
+
+bool setPwmOutput(unsigned int switchID, double value, JsonObject& root)
+{
+    ArduinoPwmOutput output;
+    SwitchEntry& entry = *switchEntry[switchID];
+    const PwmWriteResult result = writePwmOutput(output, entry.pin, MINPIN, MAXPIN,
+                                                value, entry.min, entry.max, entry.value);
+    if (result == PWM_WRITE_OK)
+        return true;
+
+    root["ErrorNumber"] = result == PWM_INVALID_CONFIG ? invalidOperation : invalidValue;
+    switch (result)
+    {
+      case PWM_INVALID_CONFIG:
+        root["ErrorMessage"] = "PWM range must have integer limits within 0..1024 and min < max";
+        break;
+      case PWM_INVALID_PIN:
+        root["ErrorMessage"] = "PWM output pin is outside the board range";
+        break;
+      default:
+        root["ErrorMessage"] = "PWM value must be an integer within the configured range";
         break;
     }
     return false;
@@ -337,9 +368,8 @@ void handlerDriver0SwitchState(void)
             returnCode = 200;
             break;
           case SWITCH_PWM:
-            switchValue = switchEntry[switchID]->value;
-            bValue = false;
-            root["Value"] =  switchValue;  
+            root["Value"] = pwmSwitchState(switchEntry[switchID]->value,
+                                            switchEntry[switchID]->min);
             returnCode = 200;
             break;          
           case SWITCH_ANALG_DAC:
@@ -366,8 +396,21 @@ void handlerDriver0SwitchState(void)
             break;
           case SWITCH_PWM:
               DEBUGSL1( "Found PWM to set");
-              switchValue = server.arg( argToSearchFor[1] ).toInt();
-              switchEntry[switchID]->value = switchValue;
+              {
+                String requestedState = server.arg(argToSearchFor[1]);
+                requestedState.trim();
+                if (!requestedState.equalsIgnoreCase("true") &&
+                    !requestedState.equalsIgnoreCase("false"))
+                {
+                  root["ErrorNumber"] = invalidValue;
+                  root["ErrorMessage"] = "State must be true or false";
+                }
+                else
+                  setPwmOutput(switchID,
+                               pwmBooleanValue(requestedState.equalsIgnoreCase("true"),
+                                               switchEntry[switchID]->min,
+                                               switchEntry[switchID]->max), root);
+              }
               returnCode = 200;              
             break;
           
@@ -667,19 +710,8 @@ void handlerDriver0SwitchValue(void)
           switch( switchEntry[switchID]->type ) 
           {
             case SWITCH_PWM: 
-                  if ( value >= switchEntry[switchID]->min && 
-                       value <= switchEntry[switchID]->max )
-                  {
-                    switchEntry[switchID]->value = value;
-                    analogWrite( switchEntry[switchID]->pin, switchEntry[switchID]->value );
-                    returnCode = 200;
-                  }
-                  else
-                  {
-                    root["ErrorMessage"] = "Digital write out of range for switch in PWM mode";
-                    root["ErrorNumber"] = invalidOperation ;
-                    returnCode = 200;
-                  }                  
+                  setPwmOutput(switchID, value, root);
+                  returnCode = 200;
                   break;
                   
             case SWITCH_RELAY_NO:
