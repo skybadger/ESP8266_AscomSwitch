@@ -151,6 +151,10 @@ Eleven Xtensa compile-time header-validation assertions and three management sou
 
 Discovery format reference: [Alpaca reference, section 5.5](https://ascom-standards.org/AlpacaDeveloper/ASCOMAlpacaAPIReference.html). The original February 2019 document does not include the later discovery specification; this check uses discovery protocol version 1 and does not introduce newer device-interface members.
 
+### Timestamp acceptance — 14 October 2026
+
+The user accepted the bounded `%lld.%03i` timestamp formatter and explicit 64-bit argument. Staged only getTimeAsString2 in the shared repository, preserving unrelated changes. Re-ran both Windows CRT formatting tests and the actual Xtensa type/format assertions successfully. The latest full ESP-01 build already included this formatter and passed (241.25 seconds). Physical device execution remains untested. Commit: `Format 64-bit ESP8266 timestamps with bounded typed conversion`.
+
 Scope: Alpaca transport `/api/v1`, its management/discovery services, and the advertised synchronous SwitchV2 interface. API version 1 and Switch interface version 2 are different numbers. Later asynchronous Switch interfaces are outside this baseline.
 
 References: [Alpaca API reference, document 1.0](https://ascom-standards.org/ASCOM%20Alpaca%20API%20Reference.pdf), [official API schemas](https://ascom-standards.org/api/), [SwitchV2 interface](https://ascom-standards.org/Help/Developer/html/T_ASCOM_DeviceInterface_ISwitchV2.htm), [SetSwitch contract](https://ascom-standards.org/Help/Developer/html/M_ASCOM_DeviceInterface_ISwitchV2_SetSwitch.htm), [PlatformIO ESP-01 target](https://docs.platformio.org/en/stable/boards/espressif8266/esp01_1m.html), and [external libraries option](https://docs.platformio.org/en/stable/projectconf/sections/env/options/library/lib_extra_dirs.html).
