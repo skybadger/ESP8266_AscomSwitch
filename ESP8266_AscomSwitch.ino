@@ -348,7 +348,7 @@ void setup()
         delay(15);        
         adcReading[i] = adc.readADC_SingleEnded(i); 
 
-        debugI("ADC reading for channel %d is %d using gain setting %d and output %f\n", i, adcReading[i], adcGainFactor[ k ], adcReading[i]* adcGainFactor[ k ] ) ;
+        debugI("ADC reading for channel %d is %d using gain factor %f and output %f\n", i, adcReading[i], (double) adcGainFactor[k], (double) (adcReading[i] * adcGainFactor[k]));
         k++;
         //otherwise try again  - increase the gain and see if we get a signal in the desired range. 
         //If we fail we end up with the best gain by default because we saved it at the top of the loop anyway. 
