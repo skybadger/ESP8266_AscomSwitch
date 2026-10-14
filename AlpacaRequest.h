@@ -71,6 +71,16 @@ constexpr bool parseAlpacaUInt32(const char* text, uint32_t& value)
     return true;
 }
 
+template <class Server, class Text>
+constexpr bool parseAlpacaOptionalUInt32(Server& server, const char* name, uint32_t& value)
+{
+    value = 0;
+    Text text;
+    const auto status = findAlpacaArgument(server, name, text);
+    return status == ALPACA_ARG_MISSING ||
+        (status == ALPACA_ARG_PRESENT && parseAlpacaUInt32(text.c_str(), value));
+}
+
 constexpr bool alpacaBooleanToken(const char* text, const char* token)
 {
     while (alpacaSpace(*text)) ++text;

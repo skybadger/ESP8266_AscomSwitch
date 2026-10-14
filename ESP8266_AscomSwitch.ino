@@ -83,6 +83,13 @@ Change Log
 #include <ESP8266HTTPUpdateServer.h>
 #include <ArduinoJson.h>  //https://arduinojson.org/v5/api/
 
+#include "AlpacaRequest.h"
+// Opt this application into strict optional IDs and its device connection handler.
+#define ASCOM_STRICT_OPTIONAL_IDS 1
+#define ASCOM_CUSTOM_CONNECTED_HANDLER 1
+int validateAlpacaRequestOwnership(uint32_t clientID, bool setting);
+#define ASCOM_VALIDATE_REQUEST_OWNERSHIP(clientID, setting) validateAlpacaRequestOwnership(clientID, setting)
+
 //Create a remote debug object
 #if !defined DEBUG_DISABLED
 RemoteDebug Debug;
@@ -401,9 +408,9 @@ void setup()
   //TODO addd mqtt host and port settings. 
   
   //Management API
-  server.on("/management/apiversions",              HTTP_GET, handleMgmtVersions );
-  server.on("/management/v1/description",           HTTP_GET, handleMgmtDescription );
-  server.on("/management/v1/configureddevices",     HTTP_GET, handleMgmtConfiguredDevices );
+  server.on("/management/apiversions",              HTTP_GET, [](){ recordAlpacaReadActivity(); handleMgmtVersions(); } );
+  server.on("/management/v1/description",           HTTP_GET, [](){ recordAlpacaReadActivity(); handleMgmtDescription(); } );
+  server.on("/management/v1/configureddevices",     HTTP_GET, [](){ recordAlpacaReadActivity(); handleMgmtConfiguredDevices(); } );
 
   server.on("/api/v1/switch/0/setup",               HTTP_GET, handlerDriver0Setup ); //ALPACA driver setup - as called by chooser
   server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerDriver0SwitchType );
@@ -504,6 +511,7 @@ void onTimeoutTimer( void* pArg )
 //Main processing loop
 void loop()
 {
+  checkAlpacaConnectionTimeout();
 #if defined USE_ADC 
   int adcChannelIndex = 0;
 #endif

@@ -59,21 +59,106 @@ bool switchRequestError(JsonObject& root, String& message, const char* error)
     return false;
 }
 
-bool beginSwitchRequest(JsonObject& root, String& message, const char* method)
+void checkAlpacaConnectionTimeout()
+{
+    alpacaConnection.expire(millis(), connectedTimeoutMs);
+    connectionCtr = alpacaConnection.connected() ? 1 : 0;
+}
+
+int validateAlpacaRequestOwnership(uint32_t clientID, bool setting)
+{
+    const auto result = alpacaConnection.request(clientID, setting, millis(),
+                                                connectedTimeoutMs, allowAnyConnectedClient);
+    connectionCtr = alpacaConnection.connected() ? 1 : 0;
+    if (result == OWNERSHIP_INVALID_CLIENT) return invalidValue;
+    if (result == OWNERSHIP_OTHER_CLIENT) return notConnected;
+    return Success;
+}
+
+const char* ownershipErrorMessage(int error)
+{
+    return error == invalidValue ? "ClientID must be supplied and greater than zero" :
+                                   "Device is owned by another ClientID";
+}
+
+bool beginSwitchRequest(JsonObject& root, String& message, const char* method, bool forceSetting = false)
 {
     uint32_t clientID = 0;
     uint32_t transID = 0;
-    String clientText, transText;
-    const auto clientStatus = findAlpacaArgument(server, "ClientID", clientText);
-    const auto transStatus = findAlpacaArgument(server, "ClientTransactionID", transText);
-    const bool clientValid = clientStatus == ALPACA_ARG_MISSING ||
-        (clientStatus == ALPACA_ARG_PRESENT && parseAlpacaUInt32(clientText.c_str(), clientID));
-    const bool transValid = transStatus == ALPACA_ARG_MISSING ||
-        (transStatus == ALPACA_ARG_PRESENT && parseAlpacaUInt32(transText.c_str(), transID));
+    const bool clientValid = parseAlpacaOptionalUInt32<ESP8266WebServer, String>(server, "ClientID", clientID);
+    const bool transValid = parseAlpacaOptionalUInt32<ESP8266WebServer, String>(server, "ClientTransactionID", transID);
     jsonResponseBuilder(root, clientID, transID, serverTransID++, method, Success, "");
     if (!clientValid || !transValid)
         return switchRequestError(root, message, "Invalid or duplicate ClientID/ClientTransactionID");
+    //Connected PUT manages acquire/release explicitly after parsing its boolean.
+    const bool connectionCommand = strcmp(method, "Connected") == 0 && server.method() == HTTP_PUT;
+    const bool setting = !connectionCommand &&
+        (forceSetting || server.method() == HTTP_PUT || server.method() == HTTP_POST);
+    const int ownershipError = validateAlpacaRequestOwnership(clientID, setting);
+    if (ownershipError != Success)
+    {
+        root["ErrorNumber"] = ownershipError;
+        root["ErrorMessage"] = ownershipErrorMessage(ownershipError);
+        sendSwitchResponse(root, message);
+        return false;
+    }
     return true;
+}
+
+bool validateSettingHandlerRequest(const char* method, bool forceSetting = true)
+{
+    String message;
+    ASCOM_JSON_OBJECT(root, 256);
+    return beginSwitchRequest(root, message, method, forceSetting);
+}
+
+void recordAlpacaReadActivity()
+{
+    uint32_t clientID = 0;
+    if (parseAlpacaOptionalUInt32<ESP8266WebServer, String>(server, "ClientID", clientID) && clientID > 0)
+        validateAlpacaRequestOwnership(clientID, false);
+}
+
+void handleConnected(void)
+{
+    String message;
+    ASCOM_JSON_OBJECT(root, 256);
+    if (!beginSwitchRequest(root, message, "Connected")) return;
+    if (server.method() == HTTP_PUT)
+    {
+        String text;
+        const uint32_t clientID = root["ClientID"];
+        bool requested = false;
+        if (findAlpacaArgument(server, "Connected", text) != ALPACA_ARG_PRESENT ||
+            !parseAlpacaBool(text.c_str(), requested))
+        {
+            switchRequestError(root, message, "Connected must be a single true or false argument");
+            return;
+        }
+        const auto result = requested ?
+            alpacaConnection.request(clientID, true, millis(), connectedTimeoutMs, allowAnyConnectedClient) :
+            alpacaConnection.disconnect(clientID, millis(), connectedTimeoutMs, allowAnyConnectedClient);
+        connectionCtr = alpacaConnection.connected() ? 1 : 0;
+        if (result != OWNERSHIP_OK)
+        {
+            const int error = result == OWNERSHIP_INVALID_CLIENT ? invalidValue : notConnected;
+            root["ErrorNumber"] = error;
+            root["ErrorMessage"] = ownershipErrorMessage(error);
+            sendSwitchResponse(root, message);
+            return;
+        }
+    }
+    root["Value"] = alpacaConnection.connected();
+    sendSwitchResponse(root, message);
+}
+
+bool requireConnectedSwitch(JsonObject& root, String& message)
+{
+    if (alpacaConnection.connected()) return true;
+    root["ErrorNumber"] = notConnected;
+    root["ErrorMessage"] = "Switch device is not connected";
+    sendSwitchResponse(root, message);
+    return false;
 }
 
 bool readSwitchId(JsonObject& root, String& message, int& id)
@@ -186,6 +271,27 @@ String& setupFormBuilderDriver0Switches( String& htmlForm, int index );
 String& setupFormBuilderFooter( String& htmlForm );
 
 //Device settings
+//Include a positive ClientID in every configuration form. With no query ID the
+//field is blank, so the browser asks the operator to select a distinct ID.
+void sendSetupContent(String& message)
+{
+    uint32_t clientID = 0;
+    parseAlpacaOptionalUInt32<ESP8266WebServer, String>(server, "ClientID", clientID);
+    String field = F("<label>Client ID <input type=\"number\" name=\"ClientID\" min=\"1\" max=\"4294967295\" required value=\"");
+    if (clientID > 0) field += String(clientID);
+    field += F("\"></label><br>");
+    int offset = 0;
+    int formStart;
+    while ((formStart = message.indexOf("<form", offset)) >= 0)
+    {
+        const int end = message.indexOf('>', formStart);
+        if (end < 0) break;
+        message = message.substring(0, end + 1) + field + message.substring(end + 1);
+        offset = end + 1 + field.length();
+    }
+    server.sendContent(message);
+}
+
 void sendDeviceSetup( int returnCode, String& message, String& err );
 void handlerDeviceSetup(void);
 void handlerDeviceHostname(void);
@@ -448,6 +554,7 @@ void handlerDriver0SwitchName(void)
 //Get/set the name of the specified switch device
 void handlerDriver0SwitchType(void)
 {
+    if (!validateSettingHandlerRequest("SwitchType", false)) return;
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -615,6 +722,7 @@ void handlerNotFound()
 
 void handlerRestart()
 {
+  if (!validateSettingHandlerRequest("Restart")) return;
   String message;
   int responseCode = 200;
   server.sendHeader( WiFi.hostname().c_str(), String("/status"), true);
@@ -639,6 +747,7 @@ void handlerNotImplemented()
 //Get a descriptor of all the switches managed by this driver for discovery purposes
 void handlerStatus(void)
 {
+    recordAlpacaReadActivity();
     String message, timeString;
     uint32_t clientID = 0;//(uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = 0;//(uint32_t)server.arg("ClientTransactionID").toInt();
@@ -653,8 +762,12 @@ void handlerStatus(void)
     root["time"] = getTimeAsString( timeString );
     root["host"] = myHostname;
     root["build version"]         = String(__DATE__) + FPSTR(BuildVersionName);
-    root["connected"] = ( connected != NOT_CONNECTED )?"true":"false";
-    root["connectedId"] = (int) connected;
+    checkAlpacaConnectionTimeout();
+    root["connected"] = alpacaConnection.connected();
+    root["connectedId"] = alpacaConnection.ownerClientID;
+    root["connectionTimeoutMs"] = connectedTimeoutMs;
+    root["connectionTimerArmed"] = alpacaConnection.timerArmed;
+    root["allowAnyConnectedClient"] = allowAnyConnectedClient;
     
     for( i = 0; i < numSwitches; i++ )
     {
@@ -721,15 +834,15 @@ void sendDeviceSetup( int returnCode, String& message, String& err )
     message = "";
 
     setupFormBuilderDeviceHeader( message, err );      
-    server.sendContent( message );
+    sendSetupContent(message);
     message = "";
     
     setupFormBuilderDeviceStrings( message );      
-    server.sendContent( message );
+    sendSetupContent(message);
     message = "";    
     
     setupFormBuilderFooter( message );
-    server.sendContent( message );
+    sendSetupContent(message);
  }
 
 /*
@@ -738,6 +851,7 @@ void sendDeviceSetup( int returnCode, String& message, String& err )
  */
  void handlerDeviceSetup( ) 
  {
+    recordAlpacaReadActivity();
    String timeString, message, err;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -756,6 +870,7 @@ void sendDeviceSetup( int returnCode, String& message, String& err )
   */
  void handlerDeviceHostname(void) 
  {
+    if (!validateSettingHandlerRequest("SetHostname")) return;
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -803,6 +918,7 @@ void sendDeviceSetup( int returnCode, String& message, String& err )
   */
  void handlerDeviceLocation(void) 
  {
+    if (!validateSettingHandlerRequest("SetLocation")) return;
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -841,6 +957,7 @@ void sendDeviceSetup( int returnCode, String& message, String& err )
 
 void handlerDeviceUdpPort(void) 
  {
+    if (!validateSettingHandlerRequest("SetUdpPort")) return;
     String message, timeString, err = "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -889,19 +1006,19 @@ void sendDriver0Setup( int returnCode, String& message, String& err )
   message = "";
   
   setupFormBuilderDriverHeader( message, err );
-  server.sendContent( message );
+  sendSetupContent(message);
   message = "";
   
   //List the switches
   for ( int i=0; i< numSwitches; i++ )
   {
     setupFormBuilderDriver0Switches( message, i ); 
-    server.sendContent( message );
+    sendSetupContent(message);
     message = "";
   }
 
   setupFormBuilderFooter( message );
-  server.sendContent( message );
+  sendSetupContent(message);
   message = "";
 }
 
@@ -912,6 +1029,7 @@ void sendDriver0Setup( int returnCode, String& message, String& err )
  */
  void handlerDriver0Setup(void)
  {
+    recordAlpacaReadActivity();
    String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -929,6 +1047,7 @@ void sendDriver0Setup( int returnCode, String& message, String& err )
   */
  void handlerDriver0SetupNumSwitches(void) 
  {
+    if (!validateSettingHandlerRequest("SetNumSwitches")) return;
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -972,6 +1091,7 @@ void sendDriver0Setup( int returnCode, String& message, String& err )
   */
  void handlerDriver0SetupSwitches(void) 
  {
+    if (!validateSettingHandlerRequest("ConfigureSwitch")) return;
     String message, timeString, err= "";
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
@@ -1565,7 +1685,7 @@ String& setupFormBuilderDriver0Switches( String& htmlForm, int index )
   htmlForm  = F("<div class=\"row float-left\" id=\"switch" );
   htmlForm += index;
   htmlForm += F("\"><div class=\"col-sm-6\">" );
-  htmlForm += F("<form action=\"/api/v1/switch/0/switches\" Method=\"PUT\">" );
+  htmlForm += F("<form action=\"/api/v1/switch/0/switches\" method=\"POST\">" );
   htmlForm += F("<fieldset class=\"border p2\">");
   htmlForm += F("<input type=\"hidden\" value=\"");
   htmlForm += index;

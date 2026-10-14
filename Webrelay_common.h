@@ -13,8 +13,11 @@ const bool reverseRelayLogic = false;
 
 //ASCOM driver common descriptor variables 
 unsigned int transactionId;
-int connectionCtr = 0; //variable to count number of times something has connected compared to disconnected. 
-unsigned int connected = (unsigned int) 0; //NOT_CONNECTED;
+int connectionCtr = 0; //0 or 1 for the current device connection state.
+#include "AlpacaConnection.h"
+AlpacaConnectionState alpacaConnection;
+bool allowAnyConnectedClient = false; //Bypass owner matching; positive ClientID is still required.
+uint32_t connectedTimeoutMs = 300UL * 1000UL; //300-second inactivity lease.
 #define ALPACA_DISCOVERY_PORT 32227
 int udpPort = ALPACA_DISCOVERY_PORT;
 static const char* PROGMEM DriverName = "Skybadger.ESPSwitch";
