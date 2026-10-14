@@ -369,7 +369,8 @@ void setup()
   server.on("/api/v1/switch/0/commandblind",        HTTP_PUT, handleCommandBlind );
   server.on("/api/v1/switch/0/commandbool",         HTTP_PUT, handleCommandBool );
   server.on("/api/v1/switch/0/commandstring",       HTTP_PUT, handleCommandString );
-  server.on("/api/v1/switch/0/connected",           handleConnected );
+  server.on("/api/v1/switch/0/connected",           HTTP_GET, handleConnected );
+  server.on("/api/v1/switch/0/connected",           HTTP_PUT, handleConnected );
   server.on("/api/v1/switch/0/description",         HTTP_GET, handleDescriptionGet );
   server.on("/api/v1/switch/0/driverinfo",          HTTP_GET, handleDriverInfoGet );
   server.on("/api/v1/switch/0/driverversion",       HTTP_GET, handleDriverVersionGet );

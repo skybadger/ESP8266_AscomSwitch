@@ -39,8 +39,16 @@ Internally this code keeps the state of the switch in the switchEntry structure 
 #include "ASCOMAPISwitch_rest.h"
 #include "RelayOutput.h"
 #include "PwmOutput.h"
+#include "AlpacaResponse.h"
 #include <errno.h>
 #include <stdlib.h>
+
+void sendSwitchResponse(JsonObject& root, String& message)
+{
+    message = "";
+    ASCOM_JSON_SERIALIZE(root, message);
+    sendAlpacaJson(server, message);
+}
 
 bool setRelayOutput(unsigned int switchID, double value, JsonObject& root)
 {
@@ -265,8 +273,7 @@ void handlerDriver0Maxswitch(void)
     jsonResponseBuilder( root, clientID, transID, serverTransID++, "MaxSwitch", Success , "" );    
     root["Value"] = numSwitches;
     
-    root.printTo(message);
-    server.send(200, "application/json", message);
+    sendSwitchResponse(root, message);
     return ;
 }
 
@@ -277,7 +284,6 @@ void handlerDriver0CanWrite(void)
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int statusCode = 400;
     int switchID = -1;
     String argToSearchFor = "Id";
 
@@ -291,23 +297,19 @@ void handlerDriver0CanWrite(void)
       if ( switchID >= 0 && switchID < numSwitches ) 
       {
         root["Value"] = switchEntry[switchID]->writeable;
-        statusCode = 200;
       }
       else
       {
-        statusCode = 400;
         root["ErrorMessage"] = "Argument switch Id out of range";
         root["ErrorNumber"] = (int) invalidValue ; 
       }
     }
     else
     {
-        statusCode = 400;
         root["ErrorMessage"] = "Missing switchID argument";
         root["ErrorNumber"] = (int) invalidOperation ;       
     }
-    root.printTo(message);
-    server.send( statusCode , "application/json", message);
+    sendSwitchResponse(root, message);
     return ;
 }
 
@@ -319,7 +321,6 @@ void handlerDriver0SwitchState(void)
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int returnCode = 200;
     double switchValue; 
     bool bValue;
     bool newState = false;
@@ -337,8 +338,7 @@ void handlerDriver0SwitchState(void)
        String output = "Missing argument: switchID";
        root["ErrorNumber"] = invalidOperation;
        root["ErrorMessage"] = output; 
-       returnCode = 400;
-       server.send(returnCode, "application/json", message);
+       sendSwitchResponse(root, message);
        return;
     }
  
@@ -349,8 +349,7 @@ void handlerDriver0SwitchState(void)
       {
         root["ErrorNumber"] = notImplemented;
         root["ErrorMessage"] = "This switch is read-only";
-        ASCOM_JSON_SERIALIZE(root, message);
-        server.send(200, "application/json", message);
+        sendSwitchResponse(root, message);
         return;
       }
       if( server.method() == HTTP_GET  )
@@ -365,16 +364,13 @@ void handlerDriver0SwitchState(void)
             else 
               bValue = true;      
             root["Value"] =  bValue;  
-            returnCode = 200;
             break;
           case SWITCH_PWM:
             root["Value"] = pwmSwitchState(switchEntry[switchID]->value,
                                             switchEntry[switchID]->min);
-            returnCode = 200;
             break;          
           case SWITCH_ANALG_DAC:
           default:
-            returnCode = 400;
             root["ErrorMessage"] = "Invalid state retrieval for switch type - not boolean"  ;
             root["ErrorNumber"] = invalidValue ;
           break;
@@ -392,7 +388,6 @@ void handlerDriver0SwitchState(void)
               else
                 newState = false;
               setRelayOutput(switchID, newState ? 1.0 : 0.0, root);
-              returnCode = 200;              
             break;
           case SWITCH_PWM:
               DEBUGSL1( "Found PWM to set");
@@ -411,12 +406,10 @@ void handlerDriver0SwitchState(void)
                                                switchEntry[switchID]->min,
                                                switchEntry[switchID]->max), root);
               }
-              returnCode = 200;              
             break;
           
           case SWITCH_ANALG_DAC:
           default:
-            returnCode = 400;
             root["ErrorMessage"] = "Invalid state for non-boolean switch type"  ;
             root["ErrorNumber"] = invalidOperation ;
             break;
@@ -431,18 +424,15 @@ void handlerDriver0SwitchState(void)
          output += server.method();
          output += " not available";
          root["ErrorMessage"] = output; 
-         returnCode = 400;
       }  
     }
     else
     {
-        returnCode = 400;
         root["ErrorMessage"] = "Invalid switch ID as argument";
         root["ErrorNumber"] = invalidValue ;
     }
 
-    root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    sendSwitchResponse(root, message);
     return;
 }
 
@@ -453,7 +443,6 @@ void handlerDriver0SwitchDescription(void)
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int returnCode = 200;
     String argToSearchFor = "Id";
     int switchID = -1;
           
@@ -470,18 +459,15 @@ void handlerDriver0SwitchDescription(void)
       {
          root["ErrorNumber"] = invalidValue;
          root["ErrorMessage"] = "Out of range argument: switchID"; 
-         returnCode = 400;    
       }
     }  
     else
     {
        root["ErrorNumber"] = invalidOperation;
        root["ErrorMessage"] = "Missing argument: switchID"; 
-       returnCode = 400;    
     }
 
-    root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    sendSwitchResponse(root, message);
     return;
 }
 
@@ -493,7 +479,6 @@ void handlerDriver0SwitchName(void)
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int returnCode = 200;
     int switchID;
     String newName =  "";
     String argToSearchFor[2] = {"Id", "Name"};
@@ -509,7 +494,6 @@ void handlerDriver0SwitchName(void)
         if ( server.method() == HTTP_GET )
         {
             root["Value"] = switchEntry[switchID]->switchName;
-            returnCode = 200;
         }
         else if( server.method() == HTTP_PUT && hasArgIC( argToSearchFor[1], server, false ) )
         {
@@ -518,7 +502,6 @@ void handlerDriver0SwitchName(void)
             {
               root["ErrorMessage"]= "Switch name too long";
               root["ErrorNumber"] = invalidValue ;
-              returnCode = 400;
             }
             else
             {
@@ -531,7 +514,6 @@ void handlerDriver0SwitchName(void)
         else
         {
            //Invalid http verb 
-           returnCode = 400;
            root["ErrorMessage"]= "Invalid HTTP verb found";
            root["ErrorNumber"] = invalidOperation;
         }
@@ -539,7 +521,6 @@ void handlerDriver0SwitchName(void)
       else
       {
         //invalid switch id 
-        returnCode = 400;
         root["ErrorMessage"]= "Invalid switch ID - outside range";
         root["ErrorNumber"] = invalidValue ;
       }
@@ -547,13 +528,11 @@ void handlerDriver0SwitchName(void)
     else
     {
       //invalid switch id 
-      returnCode = 400;
       root["ErrorMessage"]= "Missing switch ID";
       root["ErrorNumber"] = invalidOperation ;
     }
 
-    root.printTo(message);
-    server.send(returnCode, "application/json", message);
+    sendSwitchResponse(root, message);
     return;
 }
 
@@ -652,7 +631,6 @@ void handlerDriver0SwitchValue(void)
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int returnCode = 200;
     float value = 0.0F;
     uint32_t switchID = 0;
     String argToSearchFor[2] = {"Id", "Value"};
@@ -669,9 +647,7 @@ void handlerDriver0SwitchValue(void)
     {
       root["ErrorMessage"] = "Missing argument - switchID ";
       root["ErrorNumber"] = invalidValue ;
-      returnCode = 400;      
-      root.printTo(message);
-      server.send(returnCode, "application/json", message);
+      sendSwitchResponse(root, message);
       return;      
     }
       
@@ -681,8 +657,7 @@ void handlerDriver0SwitchValue(void)
         {
           root["ErrorNumber"] = notImplemented;
           root["ErrorMessage"] = "This switch is read-only";
-          ASCOM_JSON_SERIALIZE(root, message);
-          server.send(200, "application/json", message);
+          sendSwitchResponse(root, message);
           return;
         }
         if( server.method() == HTTP_GET )
@@ -694,7 +669,6 @@ void handlerDriver0SwitchValue(void)
                   break;
             case SWITCH_ANALG_DAC:
                   root["Value"] = switchEntry[switchID]->value;
-                  returnCode = 200;
                   break;                
             case SWITCH_RELAY_NO:
             case SWITCH_RELAY_NC:
@@ -711,7 +685,6 @@ void handlerDriver0SwitchValue(void)
           {
             case SWITCH_PWM: 
                   setPwmOutput(switchID, value, root);
-                  returnCode = 200;
                   break;
                   
             case SWITCH_RELAY_NO:
@@ -731,7 +704,6 @@ void handlerDriver0SwitchValue(void)
                   }
                   else
                     setRelayOutput(switchID, relayValue, root);
-                  returnCode = 200;
                 }
                   break;
             case SWITCH_ANALG_DAC:
@@ -743,7 +715,6 @@ void handlerDriver0SwitchValue(void)
                     root["ErrorMessage"] = "DAC Not implemented yet - Invalid digital operation for switch";
                     root["ErrorNumber"] = invalidOperation ;
                   }
-                  returnCode = 200;
                   break;
             default:
               break;
@@ -751,7 +722,6 @@ void handlerDriver0SwitchValue(void)
         }
         else
         {
-           returnCode = 400;
            root["ErrorMessage"] = "Invalid HTTP verb method for this URI or missing output value";
            root["ErrorNumber"] = invalidOperation ;
         }
@@ -760,11 +730,9 @@ void handlerDriver0SwitchValue(void)
     {
       root["ErrorMessage"] = "SwitchID value out of range.";
       root["ErrorNumber"] = invalidValue ;
-      returnCode = 200;
     }            
     
-    root.printTo(message);
-    server.send(returnCode, F("application/json"), message);
+    sendSwitchResponse(root, message);
     return;
 }
   
@@ -775,7 +743,6 @@ void handlerDriver0MinSwitchValue(void)
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int returnCode = 200;
     int switchID  = -1;
     String argToSearchFor = "id";
     
@@ -794,17 +761,14 @@ void handlerDriver0MinSwitchValue(void)
       {
         root["ErrorMessage"] = "SwitchID value out of range.";
         root["ErrorNumber"] = invalidValue ;
-        returnCode = 400;        
       }
     }
     else
     {
       root["ErrorMessage"] = "SwitchID argument missing .";
       root["ErrorNumber"] = invalidOperation ;
-      returnCode = 400;
     }
-    root.printTo(message);
-    server.send(returnCode, F("application/json"), message);
+    sendSwitchResponse(root, message);
     return;
 }
 
@@ -815,7 +779,6 @@ void handlerDriver0MaxSwitchValue(void)
     String message;
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-    int returnCode = 200;
     int switchID  = -1;
     String argToSearchFor = "Id";
     
@@ -829,23 +792,19 @@ void handlerDriver0MaxSwitchValue(void)
       if ( switchID >= 0 && switchID < numSwitches )
       {
         root.set<double>("Value", switchEntry[switchID]->max );
-        returnCode = 200;
       }
       else
       {
         root["ErrorMessage"] = "SwitchID value out of range.";
         root["ErrorNumber"] = invalidValue ;
-        returnCode = 400;              
       }
     }
     else
     {
        root["ErrorMessage"] = "Missing switchID argument.";
        root["ErrorNumber"] = invalidOperation  ;
-       returnCode = 400;
     }
-    root.printTo(message);
-    server.send(returnCode, F("application/json"), message);
+    sendSwitchResponse(root, message);
     return;
 }
 
@@ -857,7 +816,6 @@ void handlerDriver0SwitchStep(void)
     uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
     uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
     uint32_t switchID = -1;
-    int returnCode = 200;
     String argToSearchFor = "Id";
     
     DynamicJsonBuffer jsonBuffer(256);
@@ -870,23 +828,19 @@ void handlerDriver0SwitchStep(void)
       if( switchID >= 0 && switchID < (uint32_t) numSwitches ) 
       {
         root.set<double>("Value", switchEntry[switchID]->step );        
-        returnCode = 200;
       }
       else
       {
          root["ErrorMessage"] = "SwitchID out of range.";
          root["ErrorNumber"] = invalidValue ;
-         returnCode = 400;
       }
     }
     else
     {
        root["ErrorMessage"] = "Missing switchID argument.";
        root["ErrorNumber"] = invalidOperation ;
-       returnCode = 400;    
     }
-    root.printTo(message);
-    server.send(returnCode, F("application/json"), message);
+    sendSwitchResponse(root, message);
     return;
 }
 
@@ -895,16 +849,7 @@ void handlerDriver0SwitchStep(void)
 
 void handlerNotFound()
 {
-  String message;
-  int responseCode = 400;
-  uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
-  uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
-  DynamicJsonBuffer jsonBuffer(250);
-  JsonObject& root = jsonBuffer.createObject();
-  jsonResponseBuilder( root, clientID, transID, serverTransID++, "HandlerNotFound", invalidOperation , "No REST handler found for argument - check ASCOM Switch v2 specification" );    
-  root["Value"] = 0;
-  root.printTo(message);
-  server.send(responseCode, F("application/json"), message);
+  server.send(400, "text/plain", "Unknown path or unsupported HTTP method: " + server.uri());
 }
 
 void handlerRestart()
@@ -920,16 +865,13 @@ void handlerRestart()
 void handlerNotImplemented()
 {
   String message;
-  int responseCode = 400;
   uint32_t clientID = (uint32_t)server.arg("ClientID").toInt();
   uint32_t transID = (uint32_t)server.arg("ClientTransactionID").toInt();
 
-  DynamicJsonBuffer jsonBuffer(250);
-  JsonObject& root = jsonBuffer.createObject();
+  ASCOM_JSON_OBJECT(root, 250);
   jsonResponseBuilder( root, clientID, transID, serverTransID++, "HandlerNotFound", notImplemented  , "No REST handler implemented for argument - check ASCOM Dome v2 specification" );    
   root["Value"] = 0;
-  root.printTo(message);
-  server.send(responseCode, F("application/json"), message);
+  sendSwitchResponse(root, message);
 }
 
 //GET ​/switch​/{device_number}​/status
