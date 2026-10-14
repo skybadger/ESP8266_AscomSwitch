@@ -24,7 +24,7 @@ static const char* PROGMEM DriverName = "Skybadger.ESPSwitch";
 static const char* PROGMEM DriverVersion = "0.0.1";
 static const char* PROGMEM DriverInfo = "Skybadger.ESPSwitch RESTful native device. ";
 static const char* PROGMEM Description = "Skybadger ESP2866-based wireless ASCOM switch device";
-static const char* PROGMEM InterfaceVersion = "2";
+static const uint32_t InterfaceVersion = 2;
 static const char* PROGMEM DriverType = "Switch";
 //espasw00 GUID - "0010-0000-0000-0000"; //prototype & demo
 //espasw01 GUID - "0010-0000-0000-0001";  //Pier Switch
