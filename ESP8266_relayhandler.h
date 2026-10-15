@@ -41,6 +41,7 @@ Internally this code keeps the state of the switch in the switchEntry structure 
 #include "PwmOutput.h"
 #include "AlpacaResponse.h"
 #include "AlpacaRequest.h"
+#include "SetupPageStyle.h"
 #include <errno.h>
 #include <stdlib.h>
 
@@ -1461,26 +1462,7 @@ String& setupFormBuilderHeader( String& htmlForm )
 
   htmlForm = "<!DocType html><html lang=en ><head><meta charset=\"utf-8\">";
   htmlForm += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
-  htmlForm += "<link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css\">";
-  htmlForm += "<script src=\"https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js\"></script>";
-  htmlForm += "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js\"></script>";
-  htmlForm += "<script src=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js\"></script>";
-
-  htmlForm += "<style>\
-legend { font: 10pt;}\
-h1 { margin-top: 0; }\
-form { margin: 0 auto; width: 500px;padding: 1em;border: 1px solid #CCC;border-radius: 1em;}\
-div+div { margin-top: 1em; }\
-label span{display: inline-block;width: 150px;text-align: right;}\
-input, textarea {font: 1em sans-serif;width: 150px;box-sizing: border-box;border: 1px solid #999;}\
-input[type=checkbox], input[type=radio], input[type=submit]{width: auto;border: none;}\
-input:focus,textarea:focus{border-color:#000;}\
-textarea {vertical-align: top;height: 5em;resize: vertical;}\
-//fieldset {width: 410px;box-sizing: border-box;border: 1px solid #999;}\
-button {margin: 20px 0 0 124px;}\
-label {position:relative;}\
-label em { position: absolute;right: 5px;top: 20px;}\
-</style>";
+  htmlForm += FPSTR(setupPageStyle);
 
   //Used to enable/disable the input fields for binary relays vs digital PWM and DAC outputs. 
   htmlForm += "<script>function setTypes( a ) { \

@@ -155,6 +155,14 @@ Discovery format reference: [Alpaca reference, section 5.5](https://ascom-standa
 
 The user accepted the bounded `%lld.%03i` timestamp formatter and explicit 64-bit argument. Staged only getTimeAsString2 in the shared repository, preserving unrelated changes. Re-ran both Windows CRT formatting tests and the actual Xtensa type/format assertions successfully. The latest full ESP-01 build already included this formatter and passed (241.25 seconds). Physical device execution remains untested. Commit: `Format 64-bit ESP8266 timestamps with bounded typed conversion`.
 
+### Responsive setup pages — 14 October 2026
+
+Reviewed both served HTML setup pages and their common header, switch forms and footer. `/` and `/status` serve JSON rather than HTML; the library firmware updater is independently generated. Existing viewport metadata was correct, but fixed 500px forms, 150px labels and floated Bootstrap rows could overflow narrow screens.
+
+Added flash-resident SetupPageStyle.h and replaced the old inline styles and external Bootstrap/jQuery/Popper resources with these local styles. Forms scale to their available width and stop at 44rem on desktop. Phone labels and fields stack at a 40rem breakpoint; fieldsets shrink correctly, long descriptions wrap and controls retain usable touch heights. Existing form actions, input names, handlers and local setTypes JavaScript remain unchanged.
+
+Headless Chrome passed overflow checks at 320, 390, 768 and 1440 CSS pixels using the actual firmware stylesheet with representative device/switch/footer controls, including long text. A source check confirms both page senders use the shared styled header. This is a browser layout test, not a live-device page or firmware-updater test. Full ESP-01 compile/link passed in 104.98 seconds: flash 400,339 bytes; static RAM 44,736 bytes. Commit: `Make setup pages responsive with local mobile and desktop styles`.
+
 Scope: Alpaca transport `/api/v1`, its management/discovery services, and the advertised synchronous SwitchV2 interface. API version 1 and Switch interface version 2 are different numbers. Later asynchronous Switch interfaces are outside this baseline.
 
 References: [Alpaca API reference, document 1.0](https://ascom-standards.org/ASCOM%20Alpaca%20API%20Reference.pdf), [official API schemas](https://ascom-standards.org/api/), [SwitchV2 interface](https://ascom-standards.org/Help/Developer/html/T_ASCOM_DeviceInterface_ISwitchV2.htm), [SetSwitch contract](https://ascom-standards.org/Help/Developer/html/M_ASCOM_DeviceInterface_ISwitchV2_SetSwitch.htm), [PlatformIO ESP-01 target](https://docs.platformio.org/en/stable/boards/espressif8266/esp01_1m.html), and [external libraries option](https://docs.platformio.org/en/stable/projectconf/sections/env/options/library/lib_extra_dirs.html).
