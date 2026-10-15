@@ -1541,7 +1541,7 @@ String& setupFormBuilderDeviceHeader( String& htmlForm, String& errMsg )
   htmlForm += F("<p> This is the setup page for the <a href=\"http://www.skybadger.net\">Skybadger</a> <a href=\"https://www.ascom-standards.org\">ASCOM</a> device '");
   htmlForm += myHostname;
   htmlForm += F("' device which implements the <a href=\"https://www.ascom-standards.org/api\">ALPACA</a> v1.0 API</b> for the devices listed below:");
-  htmlForm += F("<ul><li> <a href=\"/api/v1/switch/0/setup\"> ALPACA Switch 0</a> </li>");
+  htmlForm += F("<ul><li> <a href=\"/setup/v1/switch/0/setup\"> ALPACA Switch 0</a> </li>");
   htmlForm += F("<li> <end of drivers implemented>. </li>");
   htmlForm += F("</ul></div>");
 

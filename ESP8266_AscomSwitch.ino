@@ -412,6 +412,7 @@ void setup()
   server.on("/management/v1/description",           HTTP_GET, [](){ recordAlpacaReadActivity(); handleMgmtDescription(); } );
   server.on("/management/v1/configureddevices",     HTTP_GET, [](){ recordAlpacaReadActivity(); handleMgmtConfiguredDevices(); } );
 
+  server.on("/setup/v1/switch/0/setup",             HTTP_GET, handlerDriver0Setup ); //Standard Alpaca device setup URL
   server.on("/api/v1/switch/0/setup",               HTTP_GET, handlerDriver0Setup ); //ALPACA driver setup - as called by chooser
   server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerDriver0SwitchType );
   server.on("/api/v1/switch/0/setswitchtype",       HTTP_ANY, handlerDriver0SwitchType );
