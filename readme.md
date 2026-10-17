@@ -1,4 +1,7 @@
 <h1>ESP8266_ASCOMSwitch</h1>
+
+PlatformIO build instructions, verified build results, the Alpaca v1 review and the incremental improvement plan are in [build.md](build.md). Use `./build.ps1` to compile or `./build.ps1 -Action run -Port COM5` to upload and open the serial monitor. The build uses the existing `../libraries` checkout and its ArduinoJson 7 compatibility helpers; the legacy dependency list below predates this build setup.
+
 This application provides a remote ASCOM-enabled switch device for use in Astronomical observatories and instrument setups. 
 
 This instance runs on the ESP8266-01 wifi-enabled SoC device to provide remote REST access and control of a set of (typically) 8 device-attached relays or potentially more complex devices to control power to attached devices. 

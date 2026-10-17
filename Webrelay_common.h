@@ -29,9 +29,9 @@ static const char* PROGMEM DriverType = "Switch";
 //espasw00 GUID - "0010-0000-0000-0000"; //prototype & demo
 //espasw01 GUID - "0010-0000-0000-0001";  //Pier Switch
 //espasw02 GUID - "0010-0000-0000-0002";  //Dome switch
-static const char* GUID PROGMEM = "0010-0000-0000-0002";
+static const char* GUID PROGMEM = "0010-0000-0000-0000";
 //Strings
-const char* defaultHostname = "espASW02";
+const char* defaultHostname = "espASW00";
 char* myHostname = nullptr;
 
 //MQTT settings

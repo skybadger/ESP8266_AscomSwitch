@@ -77,12 +77,12 @@ Change Log
 #include <EEPROM.h>
 #include "EEPROMAnything.h"
 #include <Wire.h>         //https://playground.arduino.cc/Main/WireLibraryDetailedReference
-#include <Time.h>         //Look at https://github.com/PaulStoffregen/Time for a more useful internal timebase library
+#include <time.h>         //Look at https://github.com/PaulStoffregen/Time for a more useful internal timebase library
 #include <WiFiUdp.h>      //WiFi UDP discovery responder
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
-#include <ArduinoJson.h>  //https://arduinojson.org/v5/api/
-
+#include <ArduinoJson.h>
+#include <ArduinoJsonCompat.h>
 #include "AlpacaRequest.h"
 // Opt this application into strict optional IDs and its device connection handler.
 #define ASCOM_STRICT_OPTIONAL_IDS 1
@@ -204,6 +204,7 @@ void setup()
   client.setServer( mqtt_server, 1883 );
   String lastWillTopic = outHealthTopic; 
   lastWillTopic.concat( myHostname );
+  client.setBufferSize( 512 ); //rather than using library defines.
   client.connect( thisID, pubsubUserID, pubsubUserPwd, lastWillTopic.c_str(), 1, true, "disconnected" ); 
   //Create a timer-based callback that causes this device to read the local i2C bus devices for data to publish.
   client.setCallback( callback );
@@ -285,7 +286,7 @@ void setup()
   server.on("/management/v1/configureddevices",     HTTP_GET, [](){ recordAlpacaReadActivity(); handleMgmtConfiguredDevices(); } );
 
   server.on("/setup/v1/switch/0/setup",             HTTP_GET, handlerDriver0Setup ); //Standard Alpaca device setup URL
-  server.on("/api/v1/switch/0/setup",               HTTP_GET, handlerDriver0Setup ); //ALPACA driver setup - as called by chooser
+  server.on("setup/api/v1/switch/0/setup",               HTTP_GET, handlerDriver0Setup ); //ALPACA driver setup - as called by chooser
   server.on("/api/v1/switch/0/getswitchtype",       HTTP_GET, handlerDriver0SwitchType );
   server.on("/api/v1/switch/0/setswitchtype",       HTTP_ANY, handlerDriver0SwitchType );
   server.on("/api/v1/switch/0/numswitches" ,        HTTP_ANY, handlerDriver0SetupNumSwitches );
@@ -315,7 +316,7 @@ void setup()
   //Show welcome message
   DEBUG_ESP( "%s\n", "Setup complete" );
   
-#if !defined DEBUG_ESP && !defined DEBUG_DISABLED
+#if !defined DEBUG_ESP_MH && !defined DEBUG_DISABLED
   //turn off serial debug if we are not actively debugging.
   //use telnet access for remote debugging
   Debug.setSerialEnabled(false); 
@@ -441,13 +442,12 @@ void callback(char* topic, byte* payload, unsigned int length)
   getTimeAsString2( timestamp );
 
   //publish to our device topic(s)
-  DynamicJsonBuffer jsonBuffer(256);
-  JsonObject& root = jsonBuffer.createObject();
+  ASCOM_JSON_OBJECT(root, 256);
   root["time"] = timestamp;
   root["hostname"] = myHostname;
   root["message"] = "Listening";
   
-  root.printTo( output);
+  ASCOM_JSON_SERIALIZE(root, output);
   
   //Put a notice out regarding device health
   outTopic = String( outHealthTopic );
@@ -461,7 +461,8 @@ void setupWifi( void )
   WiFi.mode(WIFI_STA);
   WiFi.hostname( myHostname );  
 
-  WiFi.begin( String(ssid2).c_str(), String(password2).c_str() );
+  WiFi.begin( String(ssid1).c_str(), String(password1).c_str() );
+  //WiFi.begin( String(ssid2).c_str(), String(password2).c_str() );
   Serial.println( "Searching for WiFi..\n" );
   
   while (WiFi.status() != WL_CONNECTED) 
