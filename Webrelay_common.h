@@ -54,16 +54,17 @@ char* Location = nullptr;
 #define TZ_SEC          ((TZ)*3600)
 #define DST_SEC         ((DST_MN)*60)
 
-const String switchTypes[] = {"Relay_NO", "Relay_NC", "PWM", "DAC","Not Selected"};
-const int switchTypesLen = 5;
-enum SwitchType { SWITCH_RELAY_NO, SWITCH_RELAY_NC, SWITCH_PWM, SWITCH_ANALG_DAC, SWITCH_NOT_SELECTED };
+const String switchTypes[] = {"Relay_NO", "Relay_NC", "PWM", "DAC", "Not Selected", "ADC"};
+#include "SourceMapping.h"
+const int switchTypesLen = 6;
+enum SwitchType { SWITCH_RELAY_NO, SWITCH_RELAY_NC, SWITCH_PWM, SWITCH_ANALG_DAC, SWITCH_NOT_SELECTED, SWITCH_ADC };
 
 /*
  Typical values for PWM And ADC are 0 - 1024/1024, PWM in terms of fraction of the wave is high 
  and DAC in terms of the output voltage as a fraction of Vcc. 
  */
 
-typedef struct 
+struct SwitchEntry
 {
   char* description = nullptr;
   char* switchName = nullptr;
@@ -74,12 +75,20 @@ typedef struct
   float max = 1.0;
   float step = 1.0;
   float value = 0.0F;
-} SwitchEntry;
+  SourceMapping::Binding binding;
+  SourceMapping::ValueCache sample;
+  float scale = 1.0F;
+  float offset = 0.0F;
+  SourceMapping::Result sampleError = SourceMapping::Result::NoValidValue;
+  uint32_t lastAcquisitionMs = 0;
+  bool acquisitionStarted = false;
+};
 
 #define DEFAULT_NUM_SWITCHES 4;
 const int defaultNumSwitches = DEFAULT_NUM_SWITCHES;
 //Define the maximum number of switches supported - limited by memory really 
-const int MAXSWITCH = 16;
+const int MAXSWITCH = 36; //Includes persistent native/ADC prefix; storage is bounded to one sector.
+const int MAX_CONFIGURABLE_SWITCHES = 16;
 const int MAX_NAME_LENGTH = 40;
 
 //define the max resolution available to control a DAC or PWM
@@ -89,26 +98,6 @@ const float MAXDIGITALVAL = 1024.0F; //ie 12 bit PWM and DAC resolution supporte
 const float MAXBINARYVAL = 1.0F;      // true or false ? open or closed settings on relay. 
 const float MINVAL = 0.0F;
 
-//Pin limits
-const int NULLPIN = -1; 
-#if defined ESP8266_01
-const int MINPIN = 0; //device specific
-const int MAXPIN = 3; //device specific
-
-//GPIO 0 is Serial tx, GPIO 2 I2C SDA, GPIO 1 SCL, so it depends on whether you use i2c or not.
-//Cos that just leaves Rx at GPIO3 and external power circuitry is required. 
-//In the case of the switch device as a dew heater controller, use 2 switch and 1 pwm pin to control all heater outputs.  
-//This means GPIO 3 needs connecting to both switching outputs. 
-const int pinMap[] = { 1, 3, NULLPIN }; 
-#elif defined ESP8266_12
-const int MINPIN = 0; //device specific
-const int MAXPIN = 16; //device specific
-
-//Most pins are used for flash, so we assume those for SSI are available.
-//Typically use 4 and 5 for I2C, leaves 
-const int pinMap[] = { 2, 14, 12, 13, 15, NULLPIN };
-#else
-const int pinMap[] = {NULLPIN};
-#endif 
+const int NULLPIN = -1;
 
 #endif

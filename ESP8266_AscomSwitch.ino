@@ -163,71 +163,19 @@ void publishADC( void );
 int numSwitches = 0;
 SwitchEntry** switchEntry;
 
-//8-bit port control via I2C Port Expander PCF8574
-#include "PCF8574.h"
-//- TYPE      ADDRESS-RANGE
-//- PCF8574   0x20 to 0x27, 
-//  PCF8574A  0x38 to 0x3F
-//  TI 8574A is 0x70 to 0x7E, pullups on address pins add to base 0x70
-//  Waveshare expander board is address 160
-PCF8574 switchDevice( (const uint8_t) 160, &Wire );
-bool switchPresent = false;
-uint32_t switchStatus = 0;
-
-#if defined USE_ADC
-//the purpose of the ADC is to measure the input voltages and report on them for system health purposes. 
-//Typically there are four - raw, regulated 12v, regulated 5v and regulated 3.3
-//since the raw is regulated by the time it reaches us, we need a dedicated input for that one. 
-#include <Adafruit_ADS1015.h>
-// Adafruit_ADS1115 adc;  /* Use this for the 16-bit version */
-Adafruit_ADS1015 adc;     /* Use this for the 12-bit version */
-bool adcPresent = false;
-int adcChannelIndex = 0;
-int adcChannel = 0;
-
-const int adcChannelMax = 4; //Physical max per device is 4, zero-indexed. 
-int adcGainSettings[ adcChannelMax ] = { 0,0,0,0, };
-uint16_t adcReading[4] = {0,0,0,0}; 
-
-//ESPasw01
-//int lastChannel = 2;    //12v and 3v3
-//scale factors from the resistor network for each input
-//Switch 01
-//const float adcScaleFactor[4] = { 25.3/3.3, 13.3/3.3, 1.0, 1.0 }; 
-//switch 02 
-const float adcScaleFactor[4] = { 25.3/3.3, 11.5/3.3, 4.5/3.3, 1.0 }; 
-//ESPasw02
-int lastChannel = 3;      //12v, 5v and 3v3
-
-// AD0 is single ended 0-25v raw DC input
-// AD1 is single ended 0-6v regulated DC input. 
-// AD2 is single ended 0-3.3v regulated DC input. 
-  //                                                                ADS1015  ADS1115
-  //                                                                -------  -------
-  // ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
-  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
-  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
-  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
-  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
-  // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
-const adsGain_t adcGainConstants[] = {GAIN_TWOTHIRDS, GAIN_ONE, GAIN_TWO, GAIN_FOUR, GAIN_EIGHT, GAIN_SIXTEEN };
-const int ADCGainSize = 6;
-const float adcGainFactor[] = { 0.003F, 0.002F, 0.001F, 0.0005F, 0.00025F, 0.000125F };
-#endif 
-
-const int eepromSize = 4 + (MAXSWITCH * MAX_NAME_LENGTH * 3) + (2* sizeof(int) )  + (MAXSWITCH * ( sizeof(SwitchEntry) + (2*MAX_NAME_LENGTH) ) ) + 10;
+const int eepromSize = 4096;
 
 //Order sensitive
 #include "Skybadger_common_funcs.h"
 #include "JSONHelperFunctions.h"
 #include "ASCOMAPICommon_rest.h" //From library/ASCOM_REST - ASCOM common driver descriptors and handlers. Override as required. 
+#include "MappedSources.h"
 #include "Webrelay_eeprom.h"
 #include "ESP8266_relayhandler.h"
 #include "AlpacaManagement.h"
 
 void setup()
 {
-  int error = PCF8574_OK;
   Serial.begin( 115200, SERIAL_8N1, SERIAL_TX_ONLY);
   Serial.println(F("ESP starting."));
   
@@ -241,6 +189,12 @@ void setup()
   //setDefaults();
   setupFromEeprom();
   DEBUGSL1("Setup eeprom variables complete."); 
+
+  Wire.begin(boardSdaPin, boardSclPin);
+  Wire.setClock(100000);
+  Wire.setClockStretchLimit(25000);
+  sourceBusStarted = true;
+  for (int i = 0; i < numSwitches; ++i) initializeNativeSource(*switchEntry[i]);
 
   // Connect to wifi 
   setupWifi();                   
@@ -256,23 +210,6 @@ void setup()
   client.subscribe( inTopic );
   publishHealth();
     
-  //Pins mode and direction setup for i2c on ESP8266-01
-  pinMode(0, OUTPUT);
-  pinMode(2, OUTPUT);
-  //GPIO 3 (normally RX on -01) swap the pin to a GPIO or PWM. 
-  pinMode(3, OUTPUT );
-
-  //https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/
-  //My normal I2C setup is SDA GPIO 0 on pin2, SCL GPIO 2 on pin 3 on the ESP-01
-  //for the small board in the dome switch I had to swap this around.
-  //I2C setup SDA pin 5, SCL pin 4 on ESP-12
-  //Switch 01
-  //Wire.begin( 0, 2 );// works for espasw01  - pins changed from due layout of PCF8574 
-  //Switch 02 
-  Wire.begin( 2, 0 ); //works for espasw02 and is the normal arrangement for all the other boards of this type !
-
-  Wire.setClock(100000 );//100KHz target rate
-
 #if !defined DEBUG_DISABLED
   //Debugging over telnet setup
   // Initialize the server (telnet or web socket) of RemoteDebug
@@ -298,73 +235,6 @@ void setup()
 
 ////////////////////////////////////////////////////////////////////////////////////////
   
-  DEBUGSL1("Setup relay controls");
-  switchPresent = false;
-  
-  //initial switch state setup - set pins high to read inputs, drive pins low for low outputs. Low outputs activate the relays.
-  //switchDevice.begin( 160, Wire, (const uint8_t) 0xFF );
-  switchDevice.begin( 0xFF );
-  error = switchDevice.lastError();
-  DEBUG_ESP( "Switch device - lastError is %i\n", error );
-  
-  if ( error != PCF8574_OK )
-  {
-    switchPresent = false;
-    DEBUG_ESP( "%s\n", "Unable to find switch PCF8574 device");
-  }
-  else
-  {
-    switchPresent = true;
-#if defined DEBUG_ESP_MH
-    //Toggle a relay to indicate we're working
-    switchDevice.write(0, 1);delay(1000);
-    switchDevice.write(0, 0);delay(1000);
-    switchDevice.write(0, 1);
-#endif    
-    DEBUG_ESP( "%s\n", "PCF8574 switch device found");
-    DEBUG_ESP( "%s\n", "Setting up switches from components");
-    setPins();
-    switchStatus = switchDevice.read8();
-    DEBUG_ESP( "switchStatus: %i\n", switchStatus );
-  }
-
-#if defined USE_ADC
-  DEBUG_ESP("Probe AD1015: ");
-  //                                                                ADS1015  ADS1115
-  //                                                                -------  -------
-  // adc.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
-  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
-  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
-  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
-  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
-  // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
-  adc.begin();
-  adcPresent = true;//No function to allow us to sense the ADC. 
-  
-  //Something here is just not right. Not a fucking clue what. 
-  //symptom is I always end up with reading of 4095
-  int i, k;
-  for ( i = 0, k = 0; i <= lastChannel && i < adcChannelMax; i ++ )
-  {    
-     adcReading[i]=4095;
-     //We start from low gains and wide voltage ranges to high gains and small volts. 
-     while ( adcReading[i] >=4095 && k < ADCGainSize ) 
-     {
-        adcGainSettings[i] = k;
-        adc.setGain( adcGainConstants[k] );   
-        delay(15);        
-        adcReading[i] = adc.readADC_SingleEnded(i); 
-
-        debugI("ADC reading for channel %d is %d using gain factor %f and output %f\n", i, adcReading[i], (double) adcGainFactor[k], (double) (adcReading[i] * adcGainFactor[k]));
-        k++;
-        //otherwise try again  - increase the gain and see if we get a signal in the desired range. 
-        //If we fail we end up with the best gain by default because we saved it at the top of the loop anyway. 
-     }   
-     debugI("Final Gain setting for channel %d is %f\n", i, adcGainFactor[ adcGainSettings[i] ] ) ;
-  }
-  
-#endif 
-
   //Setup webserver handler functions
   server.on("/", handlerStatus );
   server.onNotFound(handlerNotFound); 
@@ -404,6 +274,8 @@ void setup()
   server.on("/setup",                               HTTP_GET, handlerDeviceSetup );
   server.on("/setup/hostname" ,                     HTTP_ANY, handlerDeviceHostname );
   server.on("/setup/udpport",                       HTTP_ANY, handlerDeviceUdpPort );
+  server.on("/setup/source-device", HTTP_POST, handlerSourceDevice);
+  server.on("/setup/source-recover", HTTP_POST, handlerSourceRecover);
   server.on("/setup/location",                      HTTP_ANY, handlerDeviceLocation );
   //TODO addd mqtt host and port settings. 
   
@@ -451,49 +323,11 @@ void setup()
 }
 
 //Function to (re-)setup allocated pins for PWM or DAC use. 
-//Since relays pins re driven by I2C expander and the code asusmes the relays are mapped 1-2-1 to expander pins 
+//Since relay pins are driven by I2C expander and the code assumes the relays are mapped 1-2-1 to expander pins
 //Need to document that PWM config must come after relay config. 
-void setPins( void )
+void setPins(void)
 {
-  int i=0;
-  for ( i=0; i< numSwitches ; i++ )
-  {
-    switch (switchEntry[i]->type)
-    {
-      case SWITCH_PWM:
-        //Set the pin modes and set the value in case they are newly chosen
-        if ( switchEntry[i]->pin != NULLPIN && switchEntry[i]->pin <= MINPIN && switchEntry[i]->pin <= MAXPIN ) 
-          analogWrite( switchEntry[i]->pin, (int) switchEntry[i]->value );
-        break;
-       
-      case SWITCH_ANALG_DAC:
-        //Not yet implemented - 
-        //Needs an I2C DAC device 
-        //switchEntry[i]->value = switchEntry[i]->value; //TO do - read digital value back from pin ?
-        break;
-      case SWITCH_RELAY_NC:       
-      case SWITCH_RELAY_NO:
-        //refresh the values and ?? pin modes in case they have changed types
-        //If they have been used for analogue output (PWM) and then changed to digital - need to set them to 0 before use. 
-        analogWrite( switchEntry[i]->pin, 0);
-        //But since we use the I2C expander for the relay controls and not the local pins, might be able to ignore. 
-        //Relays use active low - which is the purpose of the reverseRelayLogic flag.
-        //If they read as high then they are not activated ...
-        if( reverseRelayLogic ) 
-        {
-          switchDevice.write( i, ! (bool) ( switchEntry[i]->value > 0.0F )  );
-          switchEntry[i]->value = ( switchDevice.read( i ) == 1 )? 0.0F: 1.0F ;
-        }
-        else
-        {
-          switchDevice.write( i, (bool) ( switchEntry[i]->value > 0.0F ) );
-          switchEntry[i]->value = ( switchDevice.read( i ) == 1 )? 1.0F: 0.0F ;
-        }
-        
-      default:
-        break;
-    }
-  }
+    for (int i = 0; i < numSwitches; ++i) initializeNativeSource(*switchEntry[i]);
 }
 
 //Timer handler for 'soft' 
@@ -513,33 +347,8 @@ void onTimeoutTimer( void* pArg )
 void loop()
 {
   checkAlpacaConnectionTimeout();
-#if defined USE_ADC 
-  int adcChannelIndex = 0;
-#endif
-  
-  if( newDataFlag == true ) 
-  {  
-#if defined USE_ADC 
-    //work out what gain to use that brings back the highest valid output
-    if ( adcPresent )
-    {
-      for ( adcChannelIndex = 0; adcChannelIndex <= lastChannel && adcChannelIndex < adcChannelMax; adcChannelIndex++ )
-      {
-        adc.setGain( adcGainConstants[ adcGainSettings[adcChannelIndex]] );
-        delay(15); //per channel
-        adcReading[adcChannelIndex] = adc.readADC_SingleEnded(adcChannelIndex);
-        DEBUG_ESP( "ADC value[%d]: %d", adcChannelIndex, adcReading[adcChannelIndex] );
-        debugV("Raw AIN[%d]: %i\n", adcChannelIndex, adcReading[adcChannelIndex] );
-        debugV("Processed AIN scaling: %3.3f, AIN gain:%f\n", adcScaleFactor[adcChannelIndex], adcGainFactor[ adcGainSettings[adcChannelIndex]] );
-        debugV("Processed AIN[%d]: %f\n", adcChannelIndex, adcReading[adcChannelIndex] * adcGainFactor[ adcGainSettings[adcChannelIndex]] / adcScaleFactor[adcChannelIndex] );
-        yield();       
-      }
-      debugV( "ratios of data presented: 0:1 %2.3f\n", (float) adcReading[0]/adcReading[1] );
-    }
-#endif     
-
-    newDataFlag = false;
-  }  
+  serviceMappedSources();
+  newDataFlag = false;
 
   if ( client.connected() )
   {
@@ -588,59 +397,31 @@ void callback(char* topic, byte* payload, unsigned int length)
 }
 
 #if defined USE_ADC 
- void publishADC( void )
- {
-  String outTopic;
-  String output;
-  String timestamp;
-  bool pubState = false;
-  
-  //publish to our device topic(s)
-  DynamicJsonBuffer jsonBuffer(256);
-  
-  debugI( "Publish ADC entered, adcPresent:  %i\n", adcPresent );
-  if( adcPresent )
-  {
-    int i=0;
-    String timestamp;
-    JsonObject& root = jsonBuffer.createObject();
-    output="";//reset
-
-    outTopic = String(outSenseTopic); //P_STRING
-    outTopic.concat("voltage/");
-    outTopic.concat(myHostname);
-
-    getTimeAsString2( timestamp );
-    root["time"] = timestamp;
+ void publishADC(void)
+{
+    String output;
+    ASCOM_JSON_OBJECT(root, 512);
+    ASCOM_JSON_NESTED_ARRAY(values, root, "voltages");
     root["hostname"] = myHostname;
-
-    JsonArray& voltages = root.createNestedArray( "voltages" );
-    for( i = 0; i < lastChannel; i++ )
-    {
-      JsonObject& entry = jsonBuffer.createObject();
-      entry["adcReading"] = (float) adcReading[i];
-      entry["adcScale"]   = (float) adcScaleFactor[i];
-      entry["adcGain"]    = (float) adcGainFactor[ adcGainSettings[i] ];
-      switch (i) 
-      {
-        case 0: entry["12v Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] ) ;
-          break;
-        case 1: entry["5v Voltage"] =  (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] );
-          break;
-        case 2: entry["3v3 Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] );
-          break;
-        case 3: entry["Raw Voltage"] = (float) ( adcReading[i] * adcGainFactor[adcGainSettings[i]] * adcScaleFactor[i] ); 
-          break;
-        default:
-          break;
-      }
-      voltages.add( entry );
-    }   
-    root.printTo( output );
-    pubState = client.publish( outTopic.c_str(), output.c_str(), true );
-    debugI( "topic : %s published with values: %s\n", outTopic.c_str(),  output.c_str() );
-  }
- }
+    String timestamp;
+    getTimeAsString2(timestamp);
+    root["time"] = timestamp;
+    for (int id = 0; id < numSwitches; ++id) {
+        if (switchEntry[id]->binding.mode != Mode::AnalogInput) continue;
+        double value;
+        const Result result = readMappedValue(id, value);
+        ASCOM_JSON_OBJECT(item, 256);
+        item["id"] = id; item["name"] = switchEntry[id]->switchName;
+        item["source"] = sourceKey(switchEntry[id]->binding.source);
+        item["valid"] = result == Result::Ok;
+        if (result == Result::Ok) item["value"] = value;
+        else item["error"] = sourceResultMessage(result);
+        values.add(item);
+    }
+    ASCOM_JSON_SERIALIZE(root, output);
+    const String topic = String(outSenseTopic) + "voltage/" + myHostname;
+    client.publish(topic.c_str(), output.c_str(), true);
+}
 #endif //USE_ADC
 
 /*
@@ -677,7 +458,6 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 void setupWifi( void )
 {
-  WiFi.hostname( myHostname );  
   WiFi.mode(WIFI_STA);
   WiFi.hostname( myHostname );  
 

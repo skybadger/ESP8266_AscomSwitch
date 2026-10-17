@@ -45,7 +45,7 @@ class FormattingTests(unittest.TestCase):
                 )
 
     def test_adc_gain_and_voltage_use_floating_point_arguments(self):
-        source = (ROOT / "ESP8266_AscomSwitch.ino").read_text(encoding="utf-8")
+        source = (ROOT / "MappedSources.h").read_text(encoding="utf-8")
         match = re.search(r'debugI\("(ADC reading for channel [^"]+)"', source)
         self.assertIsNotNone(match)
         format_string = match[1].replace(r"\n", "\n")

@@ -8,7 +8,7 @@ import unittest
 class AdcFormatTest(unittest.TestCase):
     def test_adc_gain_and_voltage_are_floating_point(self):
         root = pathlib.Path(__file__).resolve().parents[1]
-        source = (root / "ESP8266_AscomSwitch.ino").read_text(encoding="utf-8")
+        source = (root / "MappedSources.h").read_text(encoding="utf-8")
         match = re.search(r'debugI\("(ADC reading for channel [^"]+)"', source)
         self.assertIsNotNone(match)
         formatter = ctypes.CDLL("msvcrt")._snprintf

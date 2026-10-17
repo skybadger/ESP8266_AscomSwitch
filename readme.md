@@ -8,7 +8,7 @@ The device implements simple client (STATION) WiFi, including setting the hostna
 
 The unit uses a PCF8574 I2C bus expander to control the eight bits of attached devices. Newer devices than the 8574 can support 16 bits and the device itself supports high and low addressing for multiple devices on one bus, to allow control of up to 32 attached pins. 
 Use of the larger ESP8266-12 SoC will also allow PWM and ADC devices to be managed by mapping outputs to specific pins and functions.
-You'd have to edit the code further for that.... but its ready.
+Source mapping is now implemented for native GPIO/PWM/ADC, PCF8574, ADS1015/ADS1115 and MCP4725. Edit [BoardPinMap.h](BoardPinMap.h) for the native connectors actually exposed by the assembly, then configure confirmed external devices in setup. Native connectors appear first and persist independently of the external channel count. See [source-mapping.md](source-mapping.md) for capabilities, migration, safe recovery and testing limitations.
 
 <h2>Dependencies:</h2>
 <ul>
@@ -29,7 +29,7 @@ In setting a switch, the relay is closed by puling the related pin on the PCF857
 This code supports use of PWM if the SoC device supports it and there are free pins to assign to use it. 
 Note use of PWM will mask a relay if a pin is assigned in the default relay range . 
 i.e. if you have a 4-relay panel, configure the number of switches for example as 5 and set the  PWM pin at switch 5, assigning a pin to it and bring that pin out to a power device on your pcb.
-This code also suports use of an I2C DAC as an analogue output device, say for using as a linear power controller into a transitor output stage or a servo feedback controller. This feature is not fully implemented yet.
+The MCP4725 I2C DAC is supported using volatile 12-bit output codes 0..4095. Native PWM uses codes 0..1024. Sources are uniquely allocated by physical identity; logical switch IDs are not hardware pin numbers. Earlier relay-count/PWM placement examples above describe the legacy layout; use the current setup source selector instead.
 Device API requests require a distinct positive `ClientID`; zero means NOT_CONNECTED. Setting `Connected=true` or calling a setting handler when the device is free acquires ownership. Other clients cannot change settings or release that owner unless the global `allowAnyConnectedClient` flag is enabled (default false). The owner releases with `Connected=false`, or ownership expires after 300 seconds without an owner API call. Owner reads also renew the timeout; other clients' reads do not. Reads after timeout leave the device free until the next setting call or `Connected=true`. Disconnect/expiry preserve existing relay/PWM outputs. Transaction IDs remain optional. This positive-client-ID requirement and ownership lease are the application's explicit control policy.
 
 Open `/setup?ClientID=123` to prefill the client ID in configuration forms, or enter a positive ID in each form. Use distinct IDs for separate controllers. The global timeout is `connectedTimeoutMs = 300000` in `Webrelay_common.h`. Anonymous discovery/management and web status browsing remain available; they do not acquire ownership. MQTT/WiFi are independent of this lease, and the library-managed firmware updater is outside the Alpaca setting-handler guard.
