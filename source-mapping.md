@@ -35,6 +35,10 @@ Transport failures invalidate the device generation. Missing/recovering/stale/in
 
 ## Implemented setup and storage
 
+MQTT configuration update: setup now includes broker hostname/IPv4 address (up to 63 characters) and port (1..65535). `POST /setup/mqtt`, like the other setup UI routes, does not require ClientID. Direct REST API settings retain the ownership guard. Saving updates live variables and requests a disconnect/reconnect without reboot; the form includes current settings. Firmware boot and retries use the saved endpoint. Credentials/topics retain their existing configuration.
+
+Storage is now version 4, 4,088 bytes including the MQTT fields appended after the version-3 layout. Valid version-3 records retain their mappings and use the existing compile-time broker and port 1883 until saved. A failed EEPROM commit returns an error explaining that the settings are active only in RAM. The version-3 description below records the initial mapping implementation.
+
 [MappingUi.h](MappingUi.h) and [MappingPageScript.h](MappingPageScript.h) expose source, allowed mode, polarity, range, calibration, write policy and presence. Both browser and server enforce capabilities. Occupied resources and stale inventory submissions are rejected. Reconfiguration quiesces the old output before release; offline assignments are retained.
 
 [MappingStorage.h](MappingStorage.h) uses a bounded 4,022-byte version-3 record within 4,096-byte EEPROM emulation, with CRC and an assembly signature. Cached samples and old output commands are not persisted. Flash failures are reported as RAM-only changes. Corrupt/incompatible records fall back to safe defaults.

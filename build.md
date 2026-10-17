@@ -306,6 +306,38 @@ Do not claim compliance until the corrected firmware passes an appropriate Switc
 
 ## 17 October 2026: integrated switch source mapping
 
+### Follow-up: Allman formatting and function documentation
+
+Applied the checked-in `.clang-format` configuration to all 29 repository-owned C/C++ source files (firmware, standalone checks and test adapters). Existing function/control-flow block braces now use Allman layout with no inline function bodies; unbraced single statements remain unchanged. Added Doxygen purpose, operation, typed parameter/direction and return/effect documentation to 269 named C/C++ definitions, including test constructors and overloads, plus the three anonymous management callbacks. Added typed purpose/operation/argument/return docstrings to all 45 Python functions. Forward declarations use the documentation at their definitions. [CODING_STYLE.md](CODING_STYLE.md) records the conventions and formatter commands.
+
+A lexical audit against the pre-change snapshot confirms identical executable C++ tokens, including string/raw-string contents; external libraries and deprecated/generated files are excluded. A Python AST comparison confirms only docstrings changed except two source-test assertions updated to tolerate formatted route whitespace/comments. Formatter sorting of using declarations was disabled and original ordering restored. A structural audit confirms documented parameter coverage and separate-line compound-statement braces. No hardware or API behavior change is intended.
+
+Validation: clang-format 12 dry-run passes for all 29 files; 80 runtime assertions pass; ESP8266 target compiler passes all eight standalone assertion/format-check translation units with `-Wall -Wextra -Werror`. Request/response/connection/management checks (24), routes (4), board-map profiles (4), printf checks (3), and phone/desktop browser checks pass. Browser checks required the normal headless-Chrome permission outside the restricted process sandbox. ESP-01 build succeeded in 281.14 seconds, RAM 49,672 bytes, flash 409,923 bytes; log `.pio/allman-build.log`. Documentation refinements and callback comments are followed by a final incremental compile.
+
+### Follow-up: separate setup UI from REST ownership
+
+Removed automatic ClientID fields from setup pages. Setup settings reached through `/setup/...` and the setup restart action now operate without acquiring or releasing a REST client lease. Added POST `/setup/numswitches` and `/setup/switches` routes and changed their forms to submit there. The existing `/api/v1/switch/0/numswitches`, `/switches` and other REST setters retain positive-ClientID validation through the shared handler guard. Hostname, location, discovery port, MQTT, device profile and recovery forms likewise work without ClientID. All argument/capability/range/storage checks remain.
+
+Updated the connection regression checks and current user documentation. Earlier work-log descriptions of a ClientID in setup forms record superseded behavior.
+
+Validation: ESP-01 PlatformIO build passed in 40.81 seconds (RAM 49,672 bytes; flash 409,923 bytes), log `.pio/setup-no-client-build.log`. All 80 host runtime checks, 24 request/response/connection/management checks, four route checks and generated mobile/desktop setup-form browser checks pass. Live device/browser testing remains.
+
+### Follow-up: RemoteDebug log levels
+
+Replaced the six application `DEBUG_ESP` calls after `Debug.begin()` with RemoteDebug macros: `debugI` for initialization/state, `debugD` for reset details and `debugV` for the detailed I2C scan. None of these messages describes a warning/error; future such messages use `debugW`/`debugE` respectively. Removed explicit final newlines because RemoteDebug's `debugX` macros append them. Pre-debugger serial output and debug configuration flags remain unchanged.
+
+Validation: PlatformIO ESP-01 build succeeded in 150.63 seconds; RAM 49,656 bytes, flash 410,131 bytes. Log: `.pio/remote-debug-build.log`. No `DEBUG_ESP(...)` calls remain in application headers/sketch; the startup serial macros and shared-library implementation are preserved.
+
+### Follow-up: configurable MQTT endpoint
+
+Added a responsive MQTT broker form to device setup and a guarded `POST /setup/mqtt` handler. Accepts a server hostname/IPv4 address up to 63 characters and a port from 1 to 65535; malformed, missing or duplicate arguments are rejected before changing configuration. Existing ClientID ownership validation applies, and the standard setup renderer supplies the client-ID field.
+
+Added permanent `mqttServerName`/`mqttPort` variables used at startup and by the active PubSubClient. Saving updates these variables and EEPROM, then the main loop disconnects, selects the new endpoint, resets the old retry timer and reconnects through the existing retry/subscription path without rebooting. A failed flash commit returns HTTP 500 and explicitly reports that changes are active only in RAM. Existing credentials and topics are unchanged.
+
+Storage version 4 appends 66 bytes to the version-3 record (total 4,088 of 4,096 bytes). CRC checks use the saved schema length; valid version-3 mappings load without losing channels, with the previous compile-time MQTT broker/1883 defaults. A subsequent save writes version 4. The implementation retains a permanent broker buffer because PubSubClient stores the hostname pointer.
+
+Validation: 80 host runtime checks passed, including live endpoint application, reload, v3 migration, invalid/duplicate input and failed EEPROM commits. Generated mapping/MQTT forms pass browser layout checks at 320/390/768/1440 pixels; 24 request/response/connection/management checks and four route checks pass. Updated the timeout source check to tolerate comments and retained the legacy `/api/v1/switch/0/setup` alias alongside the existing setup routes. Final ESP-01 build passed (25.24 seconds), RAM 49,560 bytes, flash 410,067 bytes; log `.pio/mqtt-final-build.log`. Live broker connectivity and physical flash/reboot testing remain to be performed on hardware.
+
 This implementation supersedes the earlier design-only mapping review and the planned mapping/storage/resident-channel entries above. ESP32 remains paused. Implementation details and assembly instructions are in [source-mapping.md](source-mapping.md).
 
 1. **Assembly map and model:** added BoardPinMap.h with an editable list of physically exposed native connectors, allowed functions and startup polarity. Compile-time validation rejects unsupported modes, duplicate pins and UART/I2C/flash conflicts. A0 is a separate ADC-only resource. Native connectors are permanent first IDs; input-capable connectors default to high-impedance input.

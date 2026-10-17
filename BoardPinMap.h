@@ -14,43 +14,83 @@ constexpr uint8_t boardSerialTxPin = 1; //setup() uses UART TX-only.
 
 #if defined ESP8266_01
 constexpr std::array<SourceMapping::NativeResource, 1> nativeSources = {{
-    {3, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false, "RX header / GPIO3"},
+    {3, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false,
+     "RX header / GPIO3"},
     //ESP-01 does not bring A0 to its normal header. Do not add it unless wired.
 }};
 #elif defined ESP8266_12
 constexpr std::array<SourceMapping::NativeResource, 4> nativeSources = {{
-    {12, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false, "GPIO12 connector"},
-    {13, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false, "GPIO13 connector"},
-    {14, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false, "GPIO14 connector"},
+    {12, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false,
+     "GPIO12 connector"},
+    {13, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false,
+     "GPIO13 connector"},
+    {14, SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm, false,
+     "GPIO14 connector"},
     {256, SourceMapping::Adc, false, "A0 ADC connector"},
 }};
 #else
 #error Select and edit an ESP8266 assembly profile in BoardPinMap.h
 #endif
 
-constexpr size_t nativeSourceCount = nativeSources.size(); //Use array<...,0> if no native connectors are exposed.
-constexpr bool validBoardPinMap() {
+constexpr size_t nativeSourceCount =
+    nativeSources.size(); //Use array<...,0> if no native connectors are exposed.
+/**
+ * @brief Validate the exposed assembly connector map.
+ * @details Check native capabilities, resource uniqueness and conflicts with reserved bus, UART and flash pins.
+ * @par Arguments
+ * None.
+ * @return (bool) True when the described check/operation succeeds; otherwise false.
+ */
+constexpr bool validBoardPinMap()
+{
     if (boardSdaPin > 15 || boardSclPin > 15 || boardSerialTxPin != 1 ||
         (boardSdaPin >= 6 && boardSdaPin <= 11) || (boardSclPin >= 6 && boardSclPin <= 11) ||
-        boardSdaPin == boardSclPin || boardSdaPin == boardSerialTxPin || boardSclPin == boardSerialTxPin) return false;
-    for (size_t i = 0; i < nativeSourceCount; ++i) {
-        const auto& p = nativeSources[i];
-        if (p.reserved || !p.label || !p.capabilities) return false;
-        if (p.id == 256) { if (p.capabilities != SourceMapping::Adc) return false; }
+        boardSdaPin == boardSclPin || boardSdaPin == boardSerialTxPin ||
+        boardSclPin == boardSerialTxPin)
+        return false;
+    for (size_t i = 0; i < nativeSourceCount; ++i)
+    {
+        const auto &p = nativeSources[i];
+        if (p.reserved || !p.label || !p.capabilities)
+            return false;
+        if (p.id == 256)
+        {
+            if (p.capabilities != SourceMapping::Adc)
+                return false;
+        }
         else if (p.id > 16 || (p.id >= 6 && p.id <= 11) || p.id == boardSdaPin ||
-            p.id == boardSclPin || p.id == boardSerialTxPin ||
-            (p.capabilities & ~(SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm))) return false;
-        for (size_t j = 0; j < i; ++j) if (nativeSources[j].id == p.id) return false;
+                 p.id == boardSclPin || p.id == boardSerialTxPin ||
+                 (p.capabilities &
+                  ~(SourceMapping::DigitalIn | SourceMapping::DigitalOut | SourceMapping::Pwm)))
+            return false;
+        for (size_t j = 0; j < i; ++j)
+            if (nativeSources[j].id == p.id)
+                return false;
     }
     return true;
 }
-static_assert(validBoardPinMap(), "Invalid exposed connector: capability, duplicate, I2C/UART/flash conflict or A0 used as GPIO");
-constexpr uint32_t boardPinMapTag() {
+
+static_assert(
+    validBoardPinMap(),
+    "Invalid exposed connector: capability, duplicate, I2C/UART/flash conflict or A0 used as GPIO");
+
+/**
+ * @brief Identify the compiled assembly pin configuration.
+ * @details Hash bus pins and ordered native capabilities/polarities for EEPROM compatibility checks.
+ * @par Arguments
+ * None.
+ * @return (uint32_t) Deterministic assembly compatibility tag.
+ */
+constexpr uint32_t boardPinMapTag()
+{
     uint32_t hash = 2166136261u;
-    hash = (hash ^ boardSdaPin) * 16777619u; hash = (hash ^ boardSclPin) * 16777619u;
+    hash = (hash ^ boardSdaPin) * 16777619u;
+    hash = (hash ^ boardSclPin) * 16777619u;
     hash = (hash ^ boardSerialTxPin) * 16777619u;
-    for (const auto& pin : nativeSources) {
-        hash = (hash ^ pin.id) * 16777619u; hash = (hash ^ pin.capabilities) * 16777619u;
+    for (const auto &pin : nativeSources)
+    {
+        hash = (hash ^ pin.id) * 16777619u;
+        hash = (hash ^ pin.capabilities) * 16777619u;
         hash = (hash ^ static_cast<uint32_t>(pin.startupActiveLow)) * 16777619u;
     }
     return hash;
